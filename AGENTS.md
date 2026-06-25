@@ -25,8 +25,6 @@ The desired architecture is a small, explicit Harness runtime:
 - Keep placeholders small and compileable.
 - Avoid implementing Feishu, compaction, subagents, tracing, or benchmarks before
   their matching lessons unless explicitly requested.
-- Keep generated course material out of Git. The `1274/` directory and
-  `geektime-1274-offline.tar.gz` are intentionally ignored.
 
 ## Running And Verification
 
