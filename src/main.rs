@@ -1,11 +1,11 @@
 use rust_tiny_claw::context_engine::ContextManager;
-use rust_tiny_claw::engine::AgentEngine;
+use rust_tiny_claw::engine::{AgentEngine, RunOptions};
 use rust_tiny_claw::memory::FileMemory;
 use rust_tiny_claw::provider::MockProvider;
 use rust_tiny_claw::telemetry::Telemetry;
 use rust_tiny_claw::tools::{EchoTool, ToolRegistry};
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("rust-tiny-claw engine boot sequence");
 
     // TODO(ch05): replace MockProvider with a real Claude/OpenAI-compatible provider.
@@ -25,10 +25,17 @@ fn main() {
     let telemetry = Telemetry::default();
 
     let engine = AgentEngine::new(provider, registry, context, memory, telemetry);
+    let mut engine = engine;
 
     for line in engine.boot_plan() {
         println!("- {line}");
     }
 
-    println!("architecture skeleton ready; inject core modules lesson by lesson");
+    println!("starting lesson 02 mock ReAct loop");
+    engine.run_with_options(
+        "Check whether the minimal agent loop can call a tool.",
+        RunOptions { max_turns: 4 },
+    )?;
+
+    Ok(())
 }
