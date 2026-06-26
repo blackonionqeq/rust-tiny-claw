@@ -149,7 +149,7 @@ where
     }
 
     fn execute_tool_batch(&self, tool_calls: &[ToolCall]) -> Vec<ToolResult> {
-        if tool_calls.len() <= 1 {
+        if tool_calls.len() <= 1 || !self.can_execute_in_parallel(tool_calls) {
             return tool_calls
                 .iter()
                 .map(|tool_call| self.execute_one_tool(tool_call))
@@ -189,6 +189,14 @@ where
 
     fn execute_one_tool(&self, tool_call: &ToolCall) -> ToolResult {
         execute_one_tool(&self.registry, tool_call)
+    }
+
+    fn can_execute_in_parallel(&self, tool_calls: &[ToolCall]) -> bool {
+        // Keep lesson 8 concurrency focused on exploration: any mutating or
+        // unknown tool keeps the whole batch sequential.
+        tool_calls
+            .iter()
+            .all(|tool_call| self.registry.is_read_only_call(tool_call))
     }
 }
 

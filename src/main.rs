@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut engine = engine;
 
     let options = RunOptions {
-        max_turns: 8,
+        max_turns: 12,
         enable_thinking: false,
         stream: stream_enabled()?,
     };
@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("starting two-stage ReAct loop");
     engine.run_with_options(
-        "Smoke-test the lesson 8 harness. First exercise the lesson 7 edit flow: create .tiny-claw/smoke/edit-target.rs with an indented TODO auth block, read it, then use edit_file to replace that block with a Forbidden return. When calling edit_file, provide old_text without the original indentation so the fuzzy indentation fallback is exercised. Read the file again to confirm the replacement. After that verification, read Cargo.toml, README.md, and src/main.rs in one independent batch so the engine can execute multiple tool calls in parallel.",
+        "Smoke-test the lesson 8 harness. Create .tiny-claw/smoke/edit-target.rs with an indented TODO auth block. Read it once. Then call edit_file exactly once to replace that block with a Forbidden return; in old_text, omit the original indentation so the fuzzy indentation fallback is exercised. Read the file once more to confirm the replacement. Do not repeat the edit flow after it succeeds. Finally, read Cargo.toml, README.md, and src/main.rs in one independent batch so the engine can execute multiple tool calls in parallel.",
         options,
     )?;
 

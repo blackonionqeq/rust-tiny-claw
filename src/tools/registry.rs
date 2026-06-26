@@ -8,7 +8,16 @@ pub trait Tool: Send + Sync {
     fn name(&self) -> &'static str;
     fn description(&self) -> &'static str;
     fn input_schema(&self) -> serde_json::Value;
+    fn access_mode(&self, _call: &ToolCall) -> ToolAccessMode {
+        ToolAccessMode::MutatesWorkspace
+    }
     fn execute(&self, call: &ToolCall) -> ToolResult;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolAccessMode {
+    ReadOnly,
+    MutatesWorkspace,
 }
 
 #[derive(Default)]
@@ -66,6 +75,12 @@ impl ToolRegistry {
         };
 
         tool.execute(call)
+    }
+
+    pub fn is_read_only_call(&self, call: &ToolCall) -> bool {
+        self.tools
+            .get(call.name.as_str())
+            .is_some_and(|tool| tool.access_mode(call) == ToolAccessMode::ReadOnly)
     }
 }
 

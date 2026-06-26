@@ -29,14 +29,16 @@ exercise parallel tool dispatch.
 
 ## Tool Dispatch
 
-The harness supports lesson 8 parallel tool calling. When a provider returns
-more than one tool call in the same assistant message, the engine forks those
-calls onto scoped Rust threads, waits for all of them to finish, then appends
-the observations in the original tool-call order.
+The harness supports lesson 8 parallel tool calling for read-only batches. When
+a provider returns multiple read-only tool calls in the same assistant message,
+the engine forks those calls onto scoped Rust threads, waits for all of them to
+finish, then appends the observations in the original tool-call order. If any
+call in the batch may mutate the workspace, the engine keeps the batch
+sequential.
 
 This implementation intentionally follows the course scope: it trusts the
-model's same-turn independence assumption and does not yet add path-based file
-locks, read/write batch classification, async file APIs, or a global concurrency
+model's same-turn independence assumption for read-only exploration and does
+not yet add path-based file locks, async file APIs, or a global concurrency
 limit. Those are production hardening topics for later lessons.
 
 ## Tool Set

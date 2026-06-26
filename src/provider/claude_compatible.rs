@@ -188,8 +188,16 @@ fn build_request(
 ) -> Result<ClaudeMessageRequest, ProviderError> {
     let mut system = Vec::new();
     let mut claude_messages = Vec::new();
+    let mut pending_tool_results = Vec::new();
 
     for message in messages {
+        if let Some(tool_result) = to_claude_tool_result_block(message) {
+            pending_tool_results.push(tool_result);
+            continue;
+        }
+
+        flush_tool_results(&mut claude_messages, &mut pending_tool_results);
+
         match message.role {
             Role::System => {
                 if !message.content.is_empty() {
@@ -208,6 +216,7 @@ fn build_request(
             }
         }
     }
+    flush_tool_results(&mut claude_messages, &mut pending_tool_results);
 
     let tools = available_tools
         .and_then(|tools| (!tools.is_empty()).then(|| tools.iter().map(to_claude_tool).collect()));
@@ -219,6 +228,31 @@ fn build_request(
         messages: claude_messages,
         tools,
         stream: false,
+    })
+}
+
+fn flush_tool_results(
+    claude_messages: &mut Vec<ClaudeMessageParam>,
+    pending_tool_results: &mut Vec<ClaudeContentBlockParam>,
+) {
+    if pending_tool_results.is_empty() {
+        return;
+    }
+
+    claude_messages.push(ClaudeMessageParam {
+        role: "user",
+        content: std::mem::take(pending_tool_results),
+    });
+}
+
+fn to_claude_tool_result_block(message: &Message) -> Option<ClaudeContentBlockParam> {
+    let tool_call_id = message.tool_call_id.as_ref()?;
+
+    Some(ClaudeContentBlockParam::ToolResult {
+        block_type: "tool_result",
+        tool_use_id: tool_call_id.clone(),
+        content: message.content.clone(),
+        is_error: None,
     })
 }
 
@@ -234,25 +268,12 @@ fn build_stream_request(
 }
 
 fn to_claude_user_message(message: &Message) -> ClaudeMessageParam {
-    let content = if let Some(tool_call_id) = &message.tool_call_id {
-        // Claude expects tool observations to be replayed as user messages
-        // containing a tool_result block tied to the original tool_use id.
-        vec![ClaudeContentBlockParam::ToolResult {
-            block_type: "tool_result",
-            tool_use_id: tool_call_id.clone(),
-            content: message.content.clone(),
-            is_error: None,
-        }]
-    } else {
-        vec![ClaudeContentBlockParam::Text {
-            block_type: "text",
-            text: message.content.clone(),
-        }]
-    };
-
     ClaudeMessageParam {
         role: "user",
-        content,
+        content: vec![ClaudeContentBlockParam::Text {
+            block_type: "text",
+            text: message.content.clone(),
+        }],
     }
 }
 
@@ -571,6 +592,54 @@ mod tests {
                 assert_eq!(content, "24C");
             }
             _ => panic!("expected tool_result block"),
+        }
+    }
+
+    #[test]
+    fn request_groups_adjacent_tool_observations_into_one_user_message() {
+        let request = build_request(
+            "claude-test",
+            1024,
+            &[
+                Message::assistant_with_tools(
+                    "reading files",
+                    vec![
+                        ToolCall::new("toolu_1", "read_file", json!({ "path": "a.txt" })),
+                        ToolCall::new("toolu_2", "read_file", json!({ "path": "b.txt" })),
+                    ],
+                ),
+                Message::observation("toolu_1", "A"),
+                Message::observation("toolu_2", "B"),
+            ],
+            Some(&[]),
+        )
+        .unwrap();
+
+        assert_eq!(request.messages.len(), 2);
+        assert_eq!(request.messages[1].role, "user");
+        assert_eq!(request.messages[1].content.len(), 2);
+
+        match &request.messages[1].content[0] {
+            ClaudeContentBlockParam::ToolResult {
+                tool_use_id,
+                content,
+                ..
+            } => {
+                assert_eq!(tool_use_id, "toolu_1");
+                assert_eq!(content, "A");
+            }
+            _ => panic!("expected first tool_result block"),
+        }
+        match &request.messages[1].content[1] {
+            ClaudeContentBlockParam::ToolResult {
+                tool_use_id,
+                content,
+                ..
+            } => {
+                assert_eq!(tool_use_id, "toolu_2");
+                assert_eq!(content, "B");
+            }
+            _ => panic!("expected second tool_result block"),
         }
     }
 

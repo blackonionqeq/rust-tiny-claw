@@ -11,8 +11,8 @@
 - Later: support a self-correction retry when tool call JSON is invalid.
 - Later: add a global concurrency limit for parallel tool batches before adding
   high-volume network tools.
-- Later: consider read-only parallelism plus write/bash serial fallback, or
-  path-based file locks, before treating model independence as production-safe.
+- Later: consider path-based file locks before treating model same-turn
+  independence as production-safe for mutating tools.
 - Later: add explicit background task tools (`start_bg_task`, `read_bg_task`,
   `stop_bg_task`, `list_bg_tasks`) for long-running local commands; see
   `docs/background-task-notes.md`.

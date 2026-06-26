@@ -1,5 +1,5 @@
 use crate::schema::{ToolCall, ToolResult};
-use crate::tools::Tool;
+use crate::tools::{Tool, ToolAccessMode};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
@@ -131,6 +131,10 @@ impl Tool for ReadFileTool {
             },
             "required": ["path"]
         })
+    }
+
+    fn access_mode(&self, _call: &ToolCall) -> ToolAccessMode {
+        ToolAccessMode::ReadOnly
     }
 
     fn execute(&self, call: &ToolCall) -> ToolResult {
