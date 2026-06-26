@@ -315,6 +315,9 @@ impl WriteFileTool {
             return Err(format!("path '{path}' has no parent directory"));
         };
 
+        // Writes are scoped to the workspace. Parent directories may not exist
+        // yet, so validate the canonical parent after creating it instead of
+        // canonicalizing the final file path up front.
         std::fs::create_dir_all(parent).map_err(|error| {
             format!("failed to create parent directories for '{path}': {error}")
         })?;
@@ -507,6 +510,9 @@ impl Tool for BashTool {
                     std::thread::sleep(Duration::from_millis(25));
                 }
                 Ok(None) => {
+                    // Foreground commands are bounded. Long-running servers
+                    // should use explicit background task tools when that
+                    // runtime exists instead of relying on this timeout path.
                     let _ = child.kill();
                     let output = child.wait_with_output();
                     let output = match output {
@@ -557,6 +563,9 @@ impl Tool for BashTool {
         if output.status.success() {
             ToolResult::ok(call.id.clone(), output_text)
         } else {
+            // A non-zero command exit is still an observation for the model.
+            // Returning a tool error here would stop the self-correction path
+            // at the engine boundary.
             ToolResult::ok(
                 call.id.clone(),
                 format!(
