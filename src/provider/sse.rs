@@ -20,6 +20,9 @@ where
         }
 
         let line = line.trim_end_matches(['\r', '\n']);
+        // Provider stream payloads arrive as Server-Sent Events. The adapters
+        // only need JSON `data:` records; event names, comments, and keepalive
+        // lines are transport details.
         let Some(data) = line.strip_prefix("data:") else {
             continue;
         };

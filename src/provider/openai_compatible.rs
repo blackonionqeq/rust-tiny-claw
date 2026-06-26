@@ -410,6 +410,9 @@ impl OpenAiStreamState {
             }
 
             for tool_call in choice.delta.tool_calls.unwrap_or_default() {
+                // OpenAI-compatible streams send tool calls as indexed deltas.
+                // The function arguments are partial JSON strings that must be
+                // concatenated before they can become an internal ToolCall.
                 while self.tool_calls.len() <= tool_call.index {
                     self.tool_calls.push(OpenAiStreamToolCallState::default());
                 }

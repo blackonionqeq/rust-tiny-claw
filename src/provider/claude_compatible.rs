@@ -235,6 +235,8 @@ fn build_stream_request(
 
 fn to_claude_user_message(message: &Message) -> ClaudeMessageParam {
     let content = if let Some(tool_call_id) = &message.tool_call_id {
+        // Claude expects tool observations to be replayed as user messages
+        // containing a tool_result block tied to the original tool_use id.
         vec![ClaudeContentBlockParam::ToolResult {
             block_type: "tool_result",
             tool_use_id: tool_call_id.clone(),
@@ -307,6 +309,9 @@ fn parse_response(response: ClaudeMessageResponse) -> Result<Message, ProviderEr
 
                 tool_calls.push(ToolCall::new(id, name, input));
             }
+            // DeepSeek's Claude-compatible endpoint can return `thinking`
+            // blocks. They are not part of the engine-facing message, so keep
+            // parsing text/tool_use blocks and ignore the rest.
             ClaudeContentBlock::Other => {}
         }
     }
@@ -475,6 +480,8 @@ impl ClaudeStreamState {
                 index,
                 delta: ClaudeStreamDelta::InputJson { partial_json },
             } => {
+                // Claude streams tool input as JSON fragments on the content
+                // block index that started the tool_use.
                 if let Some(tool_call) = self
                     .tool_calls
                     .iter_mut()
