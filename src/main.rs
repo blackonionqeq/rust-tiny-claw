@@ -5,7 +5,9 @@ use rust_tiny_claw::provider::{
     ClaudeCompatibleProvider, MockProvider, OpenAiCompatibleProvider, Provider,
 };
 use rust_tiny_claw::telemetry::Telemetry;
-use rust_tiny_claw::tools::{BashTool, EditFileTool, ReadFileTool, ToolRegistry, WriteFileTool};
+use rust_tiny_claw::tools::{
+    BashTool, EditFileTool, GrepTool, ReadFileTool, ToolRegistry, WriteFileTool,
+};
 use std::env;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -22,6 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     registry.register(WriteFileTool::new(&work_dir)?)?;
     registry.register(BashTool::new(&work_dir)?)?;
     registry.register(EditFileTool::new(&work_dir)?)?;
+    registry.register(GrepTool::new(&work_dir)?)?;
 
     // TODO(ch10-ch15): load AGENTS.md, manage sessions, compact context, inject reminders.
     let context = ContextManager::default();
@@ -47,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("starting two-stage ReAct loop");
     engine.run_with_options(
-        "Smoke-test the lesson 8 harness. Create .tiny-claw/smoke/edit-target.rs with an indented TODO auth block. Read it once. Then call edit_file exactly once to replace that block with a Forbidden return; in old_text, omit the original indentation so the fuzzy indentation fallback is exercised. Read the file once more to confirm the replacement. Do not repeat the edit flow after it succeeds. Finally, read Cargo.toml, README.md, and src/main.rs in one independent batch so the engine can execute multiple tool calls in parallel.",
+        "Smoke-test the lesson 8 harness. Create .tiny-claw/smoke/edit-target.rs with an indented TODO auth block. Read it once. Then call edit_file exactly once to replace that block with a Forbidden return; in old_text, omit the original indentation so the fuzzy indentation fallback is exercised. Read the file once more to confirm the replacement. Do not repeat the edit flow after it succeeds. Finally, read Cargo.toml, README.md, and src/main.rs and call grep for TODO in one independent batch so the engine can execute multiple read-only tool calls in parallel.",
         options,
     )?;
 

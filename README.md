@@ -8,24 +8,33 @@ built-in mock provider plus OpenAI/Claude-compatible HTTP providers.
 
 ## Run
 
-Use WSL Ubuntu for the full build/run path:
+Use WSL Ubuntu for the full build/check path:
 
 ```powershell
 wsl -d Ubuntu -- bash -lc "cd /mnt/d/codes/rust-projects/rust-tiny-claw && cargo fmt --check && cargo check"
-wsl -d Ubuntu -- bash -lc "cd /mnt/d/codes/rust-projects/rust-tiny-claw && cargo run"
 ```
 
 For a quick type check from Windows PowerShell, `cargo check` is usually enough.
 
-The default provider is `mock`, so the project can run without an API key:
+Runtime configuration is loaded from the environment and `.env`. If
+`TINY_CLAW_PROVIDER` is unset, the code defaults to `mock`; if `.env` sets a
+real provider, plain `cargo run` will use that provider.
 
-```bash
-cargo run
+To force the deterministic mock smoke run without an API key:
+
+```powershell
+wsl -d Ubuntu -- bash -lc "cd /mnt/d/codes/rust-projects/rust-tiny-claw && TINY_CLAW_PROVIDER=mock cargo run"
+```
+
+To run with the provider configured in `.env`:
+
+```powershell
+wsl -d Ubuntu -- bash -lc "cd /mnt/d/codes/rust-projects/rust-tiny-claw && cargo run"
 ```
 
 The mock smoke run creates an indented file, edits it with `edit_file`, verifies
-the result, then requests multiple independent `read_file` calls in one turn to
-exercise parallel tool dispatch.
+the result, then requests multiple independent `read_file` and `grep` calls in
+one turn to exercise parallel read-only tool dispatch.
 
 ## Tool Dispatch
 
@@ -55,10 +64,15 @@ Registered workspace tools:
   exact matching first, then conservative formatting fallbacks for newline,
   surrounding whitespace, and indentation differences. Ambiguous matches fail
   and ask the model to provide more context.
+- `grep`: searches workspace files with ripgrep-compatible regular expressions,
+  optional path narrowing, case sensitivity, context lines, and bounded output.
 
-`read_file`, `write_file`, and `edit_file` reject absolute paths and paths that
-escape the workspace. `bash` follows the course's local YOLO execution model,
-but still binds execution to the workspace and enforces resource limits.
+`read_file`, `write_file`, `edit_file`, and `grep` reject absolute paths and
+paths that escape the workspace. `grep` prefers `rg` in `PATH`, falls back to
+system `grep` when `rg` is missing, and reports a clear observation if neither
+command is available. The fallback may not follow ripgrep's ignore rules.
+`bash` follows the course's local YOLO execution model, but still binds
+execution to the workspace and enforces resource limits.
 
 ## Provider Configuration
 

@@ -200,9 +200,12 @@ impl Provider for MockProvider {
                     "mock provider expected a read_file tool",
                 ));
             }
+            if !available_tools.iter().any(|tool| tool.name == "grep") {
+                return Err(ProviderError::new("mock provider expected a grep tool"));
+            }
 
             return Ok(Message::assistant_with_tools(
-                "I will read three independent project files in one batch to exercise parallel tool dispatch.",
+                "I will read three independent project files and grep for TODO in one batch to exercise parallel read-only tool dispatch.",
                 vec![
                     ToolCall::new(
                         "call_005_a",
@@ -218,6 +221,11 @@ impl Provider for MockProvider {
                         "call_005_c",
                         "read_file",
                         json!({ "path": "src/main.rs", "start_line": 1, "line_count": 80 }),
+                    ),
+                    ToolCall::new(
+                        "call_005_d",
+                        "grep",
+                        json!({ "query": "TODO", "path": "src", "max_matches": 20 }),
                     ),
                 ],
             ));
