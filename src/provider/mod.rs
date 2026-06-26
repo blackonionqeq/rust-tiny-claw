@@ -1,5 +1,9 @@
+mod openai_compatible;
+
 use crate::schema::{Message, ToolCall, ToolDefinition};
 use serde_json::json;
+
+pub use openai_compatible::OpenAiCompatibleProvider;
 
 // Provider is the narrow boundary between the harness and an LLM backend.
 // This lesson keeps it synchronous; real network adapters can come later.
@@ -13,6 +17,23 @@ pub trait Provider {
         messages: &[Message],
         available_tools: Option<&[ToolDefinition]>,
     ) -> Result<Message, ProviderError>;
+}
+
+impl<T> Provider for Box<T>
+where
+    T: Provider + ?Sized,
+{
+    fn name(&self) -> &'static str {
+        (**self).name()
+    }
+
+    fn generate(
+        &mut self,
+        messages: &[Message],
+        available_tools: Option<&[ToolDefinition]>,
+    ) -> Result<Message, ProviderError> {
+        (**self).generate(messages, available_tools)
+    }
 }
 
 #[derive(Debug)]

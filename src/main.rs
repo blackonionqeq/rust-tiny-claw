@@ -1,15 +1,17 @@
 use rust_tiny_claw::context_engine::ContextManager;
 use rust_tiny_claw::engine::{AgentEngine, RunOptions};
 use rust_tiny_claw::memory::FileMemory;
-use rust_tiny_claw::provider::MockProvider;
+use rust_tiny_claw::provider::{MockProvider, OpenAiCompatibleProvider, Provider};
 use rust_tiny_claw::telemetry::Telemetry;
 use rust_tiny_claw::tools::{EchoTool, ToolRegistry};
+use std::env;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let _ = dotenvy::dotenv();
+
     println!("rust-tiny-claw engine boot sequence");
 
-    // TODO(ch05): replace MockProvider with a real Claude/OpenAI-compatible provider.
-    let provider = MockProvider::default();
+    let provider = build_provider()?;
 
     // TODO(ch06-ch08): register real read/write/edit/bash tools behind middleware.
     let mut registry = ToolRegistry::new();
@@ -31,14 +33,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("- {line}");
     }
 
-    println!("starting lesson 03 mock two-stage ReAct loop");
+    println!("starting two-stage ReAct loop");
     engine.run_with_options(
-        "Check whether the minimal agent loop can call a tool.",
+        "Call the echo tool exactly once with the text 'workspace tools are wired', then report the observation and finish.",
         RunOptions {
             max_turns: 4,
-            enable_thinking: true,
+            enable_thinking: false,
         },
     )?;
 
     Ok(())
+}
+
+fn build_provider() -> Result<Box<dyn Provider>, Box<dyn std::error::Error>> {
+    match env::var("TINY_CLAW_PROVIDER")
+        .unwrap_or_else(|_| "mock".to_string())
+        .as_str()
+    {
+        "mock" => Ok(Box::new(MockProvider::default())),
+        "openai-compatible" => Ok(Box::new(OpenAiCompatibleProvider::from_env()?)),
+        other => Err(format!("unsupported TINY_CLAW_PROVIDER: {other}").into()),
+    }
 }

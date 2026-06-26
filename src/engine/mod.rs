@@ -41,7 +41,7 @@ where
             format!("context manager: {}", self.context.name()),
             format!("memory root: {}", self.memory.root().display()),
             format!("telemetry: {}", self.telemetry.name()),
-            "lesson 03: two-stage thinking loop available".to_string(),
+            "two-stage ReAct loop available".to_string(),
         ]
     }
 
