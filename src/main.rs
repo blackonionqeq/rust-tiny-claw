@@ -5,7 +5,7 @@ use rust_tiny_claw::provider::{
     ClaudeCompatibleProvider, MockProvider, OpenAiCompatibleProvider, Provider,
 };
 use rust_tiny_claw::telemetry::Telemetry;
-use rust_tiny_claw::tools::{BashTool, ReadFileTool, ToolRegistry, WriteFileTool};
+use rust_tiny_claw::tools::{BashTool, EditFileTool, ReadFileTool, ToolRegistry, WriteFileTool};
 use std::env;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -21,6 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     registry.register(ReadFileTool::new(&work_dir)?)?;
     registry.register(WriteFileTool::new(&work_dir)?)?;
     registry.register(BashTool::new(&work_dir)?)?;
+    registry.register(EditFileTool::new(&work_dir)?)?;
 
     // TODO(ch10-ch15): load AGENTS.md, manage sessions, compact context, inject reminders.
     let context = ContextManager::default();
@@ -35,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut engine = engine;
 
     let options = RunOptions {
-        max_turns: 6,
+        max_turns: 8,
         enable_thinking: false,
         stream: stream_enabled()?,
     };
@@ -46,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("starting two-stage ReAct loop");
     engine.run_with_options(
-        "Smoke-test the lesson 6 minimal tool set: read Cargo.toml, write a small file under .tiny-claw/smoke, then use bash to print that file and confirm the result.",
+        "Smoke-test the lesson 7 edit tool. Create .tiny-claw/smoke/edit-target.rs with an indented TODO auth block, read it, then use edit_file to replace that block with a Forbidden return. When calling edit_file, provide old_text without the original indentation so the fuzzy indentation fallback is exercised. Read the file again to confirm the replacement.",
         options,
     )?;
 
