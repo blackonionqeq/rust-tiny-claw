@@ -11,8 +11,9 @@
 - Later: support a self-correction retry when tool call JSON is invalid.
 - Later: add a global concurrency limit for parallel tool batches before adding
   high-volume network tools.
-- Later: consider path-based file locks before treating model same-turn
-  independence as production-safe for mutating tools.
+- Later: consider path-based file locks only when the engine needs finer-grained
+  scheduling than the current batch policy, such as concurrent writes to
+  different files or cross-turn resource protection for background tasks.
 - Later: add explicit background task tools (`start_bg_task`, `read_bg_task`,
   `stop_bg_task`, `list_bg_tasks`) for long-running local commands; see
   `docs/background-task-notes.md`.
