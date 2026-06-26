@@ -2,24 +2,13 @@
 
 Rust learning project for building an Agent Harness lesson by lesson.
 
-The current code is an early runnable harness: it wires together the major
-runtime pieces, runs a small two-stage ReAct loop, exposes a minimal local tool
-set, executes same-turn tool batches in parallel, and can use either the mock
-provider or real OpenAI/Claude-compatible HTTP providers.
+Current chapter state: the harness can run a two-stage ReAct loop, call local
+workspace tools, and execute same-turn tool batches in parallel. It supports the
+built-in mock provider plus OpenAI/Claude-compatible HTTP providers.
 
-## Module Map
+## Run
 
-- `engine`: ReAct main loop and orchestration.
-- `provider`: model provider abstraction and concrete adapters.
-- `context_engine`: prompt composition, context tracking, compaction, reminders.
-- `tools`: tool traits, registry, dispatch, and middleware.
-- `memory`: file-backed session state, plans, todos, and working memory.
-- `integrations/feishu`: Feishu event and approval integration.
-- `telemetry`: token cost, elapsed time, and tracing.
-
-## First Check
-
-Use WSL Ubuntu for the full build/run path on this machine:
+Use WSL Ubuntu for the full build/run path:
 
 ```powershell
 wsl -d Ubuntu -- bash -lc "cd /mnt/d/codes/rust-projects/rust-tiny-claw && cargo fmt --check && cargo check"
@@ -34,11 +23,9 @@ The default provider is `mock`, so the project can run without an API key:
 cargo run
 ```
 
-Expected output includes the provider, streaming mode, thinking phase setting,
-registered tools, context manager, memory root, telemetry, and a short ReAct
-exchange that creates an indented smoke-test file, edits it with `edit_file`,
-reads it back for verification, then requests multiple independent `read_file`
-calls in one turn so the engine exercises parallel tool dispatch.
+The mock smoke run creates an indented file, edits it with `edit_file`, verifies
+the result, then requests multiple independent `read_file` calls in one turn to
+exercise parallel tool dispatch.
 
 ## Tool Dispatch
 
@@ -54,7 +41,7 @@ limit. Those are production hardening topics for later lessons.
 
 ## Tool Set
 
-The harness currently registers the lesson 8 workspace tools:
+Registered workspace tools:
 
 - `read_file`: reads a workspace-relative file with optional line ranges.
 - `write_file`: creates or fully overwrites a workspace-relative file, creating
