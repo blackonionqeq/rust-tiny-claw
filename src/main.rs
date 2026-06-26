@@ -45,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("starting two-stage ReAct loop");
     engine.run_with_options(
-        "Call the read_file tool exactly once to read Cargo.toml, then summarize the package name and finish.",
+        "Call the read_file tool exactly once to read the first 80 lines of Cargo.lock, then summarize what kind of file it is and finish.",
         options,
     )?;
 

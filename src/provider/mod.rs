@@ -128,11 +128,11 @@ impl Provider for MockProvider {
             }
 
             return Ok(Message::assistant_with_tools(
-                "I will read the workspace manifest.",
+                "I will read the start of the lockfile.",
                 vec![ToolCall::new(
                     "call_001",
                     "read_file",
-                    json!({ "path": "Cargo.toml" }),
+                    json!({ "path": "Cargo.lock", "start_line": 1, "line_count": 80 }),
                 )],
             ));
         }
