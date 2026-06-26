@@ -9,6 +9,9 @@
 ## Tool Calling
 
 - Later: support a self-correction retry when tool call JSON is invalid.
+- Later: add explicit background task tools (`start_bg_task`, `read_bg_task`,
+  `stop_bg_task`, `list_bg_tasks`) for long-running local commands; see
+  `docs/background-task-notes.md`.
 - Expand tests for multi-turn tool call histories and provider-specific edge cases.
 - Later: evaluate head/tail previews and shared tool-output offloading on top of
   the existing ranged `read_file` support.
