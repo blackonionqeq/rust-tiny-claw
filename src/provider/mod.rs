@@ -6,10 +6,12 @@ use serde_json::json;
 pub trait Provider {
     fn name(&self) -> &'static str;
 
+    // None means tool mode is disabled for this request; Some means the provider
+    // may expose the supplied tool definitions to the model.
     fn generate(
         &mut self,
         messages: &[Message],
-        available_tools: &[ToolDefinition],
+        available_tools: Option<&[ToolDefinition]>,
     ) -> Result<Message, ProviderError>;
 }
 
@@ -48,8 +50,14 @@ impl Provider for MockProvider {
     fn generate(
         &mut self,
         messages: &[Message],
-        available_tools: &[ToolDefinition],
+        available_tools: Option<&[ToolDefinition]>,
     ) -> Result<Message, ProviderError> {
+        let Some(available_tools) = available_tools else {
+            return Ok(Message::assistant(
+                "I should first plan the next step without using tools. The task needs a simple observation, so I will use the echo tool once tools are available.",
+            ));
+        };
+
         self.turn += 1;
 
         if self.turn == 1 {

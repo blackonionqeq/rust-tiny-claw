@@ -41,7 +41,7 @@ where
             format!("context manager: {}", self.context.name()),
             format!("memory root: {}", self.memory.root().display()),
             format!("telemetry: {}", self.telemetry.name()),
-            "lesson 02: ReAct main loop available".to_string(),
+            "lesson 03: two-stage thinking loop available".to_string(),
         ]
     }
 
@@ -67,8 +67,20 @@ where
             println!("[turn {turn}] reasoning");
 
             let available_tools = self.registry.definitions();
-            // Reason: ask the model/provider what to do next with the full timeline.
-            let response = self.provider.generate(&messages, &available_tools)?;
+            if options.enable_thinking {
+                println!("[thinking] tools disabled");
+
+                // Phase 1: hide the tool schema so the provider cannot emit tool calls.
+                // This is distinct from passing an empty tool list to an enabled tool mode.
+                let thinking = self.provider.generate(&messages, None)?;
+                if !thinking.content.is_empty() {
+                    println!("thinking: {}", thinking.content);
+                    messages.push(thinking);
+                }
+            }
+
+            // Phase 2: restore tool access and let the provider act on the accumulated context.
+            let response = self.provider.generate(&messages, Some(&available_tools))?;
 
             if !response.content.is_empty() {
                 println!("assistant: {}", response.content);
@@ -111,11 +123,15 @@ where
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RunOptions {
     pub max_turns: usize,
+    pub enable_thinking: bool,
 }
 
 impl Default for RunOptions {
     fn default() -> Self {
-        Self { max_turns: 16 }
+        Self {
+            max_turns: 16,
+            enable_thinking: false,
+        }
     }
 }
 

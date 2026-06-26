@@ -31,10 +31,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("- {line}");
     }
 
-    println!("starting lesson 02 mock ReAct loop");
+    println!("starting lesson 03 mock two-stage ReAct loop");
     engine.run_with_options(
         "Check whether the minimal agent loop can call a tool.",
-        RunOptions { max_turns: 4 },
+        RunOptions {
+            max_turns: 4,
+            enable_thinking: true,
+        },
     )?;
 
     Ok(())
