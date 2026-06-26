@@ -2,6 +2,7 @@
 
 ## Provider
 
+- Add adaptive reasoning mode to replace the fixed `enable_thinking` boolean.
 - Add provider retry and backoff policy.
 - Consider vendor-specific profiles only after at least two real providers diverge in behavior or configuration.
 
