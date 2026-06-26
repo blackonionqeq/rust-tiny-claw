@@ -1,0 +1,470 @@
+use crate::provider::{Provider, ProviderError};
+use crate::schema::{Message, Role, ToolCall, ToolDefinition};
+use reqwest::blocking::Client;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::env;
+use std::time::Duration;
+
+const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
+const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
+const DEFAULT_TIMEOUT_SECONDS: u64 = 60;
+const DEFAULT_MAX_TOKENS: u64 = 4096;
+const DEFAULT_ANTHROPIC_VERSION: &str = "2023-06-01";
+
+#[derive(Debug)]
+pub struct ClaudeCompatibleProvider {
+    client: Client,
+    config: ClaudeCompatibleConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaudeCompatibleConfig {
+    pub api_key: String,
+    pub base_url: String,
+    pub model: String,
+    pub timeout_seconds: u64,
+    pub max_tokens: u64,
+    pub anthropic_version: String,
+}
+
+impl ClaudeCompatibleConfig {
+    pub fn from_env() -> Result<Self, ProviderError> {
+        let api_key = required_env("TINY_CLAW_API_KEY")?;
+        let base_url =
+            env::var("TINY_CLAW_BASE_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string());
+        let model = env::var("TINY_CLAW_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+        let timeout_seconds =
+            parse_optional_u64_env("TINY_CLAW_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS)?;
+        let max_tokens = parse_optional_u64_env("TINY_CLAW_MAX_TOKENS", DEFAULT_MAX_TOKENS)?;
+        let anthropic_version = env::var("TINY_CLAW_ANTHROPIC_VERSION")
+            .unwrap_or_else(|_| DEFAULT_ANTHROPIC_VERSION.to_string());
+
+        Ok(Self {
+            api_key,
+            base_url,
+            model,
+            timeout_seconds,
+            max_tokens,
+            anthropic_version,
+        })
+    }
+}
+
+impl ClaudeCompatibleProvider {
+    pub fn from_env() -> Result<Self, ProviderError> {
+        Self::new(ClaudeCompatibleConfig::from_env()?)
+    }
+
+    pub fn new(config: ClaudeCompatibleConfig) -> Result<Self, ProviderError> {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(config.timeout_seconds))
+            .build()
+            .map_err(|error| ProviderError::new(format!("failed to build HTTP client: {error}")))?;
+
+        Ok(Self { client, config })
+    }
+
+    fn endpoint(&self) -> String {
+        format!("{}/v1/messages", self.config.base_url.trim_end_matches('/'))
+    }
+}
+
+impl Provider for ClaudeCompatibleProvider {
+    fn name(&self) -> &'static str {
+        "claude-compatible"
+    }
+
+    fn generate(
+        &mut self,
+        messages: &[Message],
+        available_tools: Option<&[ToolDefinition]>,
+    ) -> Result<Message, ProviderError> {
+        let request = build_request(
+            &self.config.model,
+            self.config.max_tokens,
+            messages,
+            available_tools,
+        )?;
+        let response = self
+            .client
+            .post(self.endpoint())
+            .header("x-api-key", &self.config.api_key)
+            .header("anthropic-version", &self.config.anthropic_version)
+            .json(&request)
+            .send()
+            .map_err(|error| ProviderError::new(format!("provider request failed: {error}")))?;
+
+        let status = response.status();
+        let body = response.text().map_err(|error| {
+            ProviderError::new(format!("failed to read response body: {error}"))
+        })?;
+
+        if !status.is_success() {
+            return Err(ProviderError::new(format!(
+                "provider returned HTTP {status}: {body}"
+            )));
+        }
+
+        let response: ClaudeMessageResponse = serde_json::from_str(&body).map_err(|error| {
+            ProviderError::new(format!(
+                "failed to parse provider response: {error}; raw response: {body}"
+            ))
+        })?;
+
+        parse_response(response)
+    }
+}
+
+fn required_env(name: &str) -> Result<String, ProviderError> {
+    match env::var(name) {
+        Ok(value) if !value.trim().is_empty() => Ok(value),
+        _ => Err(ProviderError::new(format!(
+            "missing required environment variable: {name}"
+        ))),
+    }
+}
+
+fn parse_optional_u64_env(name: &str, default: u64) -> Result<u64, ProviderError> {
+    match env::var(name) {
+        Ok(value) => value
+            .parse::<u64>()
+            .map_err(|error| ProviderError::new(format!("invalid {name} value: {error}"))),
+        Err(_) => Ok(default),
+    }
+}
+
+fn build_request(
+    model: &str,
+    max_tokens: u64,
+    messages: &[Message],
+    available_tools: Option<&[ToolDefinition]>,
+) -> Result<ClaudeMessageRequest, ProviderError> {
+    let mut system = Vec::new();
+    let mut claude_messages = Vec::new();
+
+    for message in messages {
+        match message.role {
+            Role::System => {
+                if !message.content.is_empty() {
+                    system.push(ClaudeTextBlock {
+                        block_type: "text",
+                        text: message.content.clone(),
+                    });
+                }
+            }
+            Role::User => claude_messages.push(to_claude_user_message(message)),
+            Role::Assistant => {
+                let assistant = to_claude_assistant_message(message);
+                if !assistant.content.is_empty() {
+                    claude_messages.push(assistant);
+                }
+            }
+        }
+    }
+
+    let tools = available_tools
+        .and_then(|tools| (!tools.is_empty()).then(|| tools.iter().map(to_claude_tool).collect()));
+
+    Ok(ClaudeMessageRequest {
+        model: model.to_string(),
+        max_tokens,
+        system: (!system.is_empty()).then_some(system),
+        messages: claude_messages,
+        tools,
+        stream: false,
+    })
+}
+
+fn to_claude_user_message(message: &Message) -> ClaudeMessageParam {
+    let content = if let Some(tool_call_id) = &message.tool_call_id {
+        vec![ClaudeContentBlockParam::ToolResult {
+            block_type: "tool_result",
+            tool_use_id: tool_call_id.clone(),
+            content: message.content.clone(),
+            is_error: None,
+        }]
+    } else {
+        vec![ClaudeContentBlockParam::Text {
+            block_type: "text",
+            text: message.content.clone(),
+        }]
+    };
+
+    ClaudeMessageParam {
+        role: "user",
+        content,
+    }
+}
+
+fn to_claude_assistant_message(message: &Message) -> ClaudeMessageParam {
+    let mut content = Vec::new();
+
+    if !message.content.is_empty() {
+        content.push(ClaudeContentBlockParam::Text {
+            block_type: "text",
+            text: message.content.clone(),
+        });
+    }
+
+    for tool_call in &message.tool_calls {
+        content.push(ClaudeContentBlockParam::ToolUse {
+            block_type: "tool_use",
+            id: tool_call.id.clone(),
+            name: tool_call.name.clone(),
+            input: tool_call.arguments.clone(),
+        });
+    }
+
+    ClaudeMessageParam {
+        role: "assistant",
+        content,
+    }
+}
+
+fn to_claude_tool(tool: &ToolDefinition) -> ClaudeTool {
+    ClaudeTool {
+        name: tool.name.clone(),
+        description: tool.description.clone(),
+        input_schema: tool.input_schema.clone(),
+    }
+}
+
+fn parse_response(response: ClaudeMessageResponse) -> Result<Message, ProviderError> {
+    let mut content = String::new();
+    let mut tool_calls = Vec::new();
+
+    for block in response.content {
+        match block {
+            ClaudeContentBlock::Text { text, .. } => {
+                content.push_str(&text);
+            }
+            ClaudeContentBlock::ToolUse {
+                id, name, input, ..
+            } => {
+                if !input.is_object() {
+                    return Err(ProviderError::new(format!(
+                        "invalid tool call arguments for tool '{name}': expected JSON object; raw arguments: {input}"
+                    )));
+                }
+
+                tool_calls.push(ToolCall::new(id, name, input));
+            }
+            ClaudeContentBlock::Other => {}
+        }
+    }
+
+    if tool_calls.is_empty() {
+        Ok(Message::assistant(content))
+    } else {
+        Ok(Message::assistant_with_tools(content, tool_calls))
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct ClaudeMessageRequest {
+    model: String,
+    max_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<Vec<ClaudeTextBlock>>,
+    messages: Vec<ClaudeMessageParam>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<ClaudeTool>>,
+    stream: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ClaudeTextBlock {
+    #[serde(rename = "type")]
+    block_type: &'static str,
+    text: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ClaudeMessageParam {
+    role: &'static str,
+    content: Vec<ClaudeContentBlockParam>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum ClaudeContentBlockParam {
+    Text {
+        #[serde(rename = "type")]
+        block_type: &'static str,
+        text: String,
+    },
+    ToolUse {
+        #[serde(rename = "type")]
+        block_type: &'static str,
+        id: String,
+        name: String,
+        input: Value,
+    },
+    ToolResult {
+        #[serde(rename = "type")]
+        block_type: &'static str,
+        tool_use_id: String,
+        content: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        is_error: Option<bool>,
+    },
+}
+
+#[derive(Debug, Serialize)]
+struct ClaudeTool {
+    name: String,
+    description: String,
+    input_schema: Value,
+}
+
+#[derive(Debug, Deserialize)]
+struct ClaudeMessageResponse {
+    content: Vec<ClaudeContentBlock>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+enum ClaudeContentBlock {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "tool_use")]
+    ToolUse {
+        id: String,
+        name: String,
+        input: Value,
+    },
+    #[serde(other)]
+    Other,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schema::ToolDefinition;
+    use serde_json::json;
+
+    #[test]
+    fn request_moves_system_messages_to_system_field() {
+        let request = build_request(
+            "claude-test",
+            1024,
+            &[Message::system("system prompt"), Message::user("hello")],
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(request.system.unwrap()[0].text, "system prompt");
+        assert_eq!(request.messages.len(), 1);
+        assert_eq!(request.messages[0].role, "user");
+    }
+
+    #[test]
+    fn request_maps_tool_observation_to_tool_result_block() {
+        let request = build_request(
+            "claude-test",
+            1024,
+            &[Message::observation("toolu_1", "24C")],
+            Some(&[]),
+        )
+        .unwrap();
+
+        match &request.messages[0].content[0] {
+            ClaudeContentBlockParam::ToolResult {
+                tool_use_id,
+                content,
+                ..
+            } => {
+                assert_eq!(tool_use_id, "toolu_1");
+                assert_eq!(content, "24C");
+            }
+            _ => panic!("expected tool_result block"),
+        }
+    }
+
+    #[test]
+    fn request_maps_tool_definitions() {
+        let tools = vec![ToolDefinition::new(
+            "echo",
+            "Echo input.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "text": { "type": "string" }
+                },
+                "required": ["text"]
+            }),
+        )];
+
+        let request =
+            build_request("claude-test", 1024, &[Message::user("hello")], Some(&tools)).unwrap();
+
+        let tools = request.tools.unwrap();
+        assert_eq!(tools[0].name, "echo");
+        assert_eq!(tools[0].input_schema["type"], "object");
+    }
+
+    #[test]
+    fn response_maps_tool_use_blocks_to_internal_message() {
+        let response = ClaudeMessageResponse {
+            content: vec![
+                ClaudeContentBlock::Text {
+                    text: "calling echo".to_string(),
+                },
+                ClaudeContentBlock::ToolUse {
+                    id: "toolu_1".to_string(),
+                    name: "echo".to_string(),
+                    input: json!({ "text": "hi" }),
+                },
+            ],
+        };
+
+        let message = parse_response(response).unwrap();
+
+        assert_eq!(message.content, "calling echo");
+        assert_eq!(message.tool_calls.len(), 1);
+        assert_eq!(message.tool_calls[0].arguments, json!({ "text": "hi" }));
+    }
+
+    #[test]
+    fn response_rejects_non_object_tool_arguments() {
+        let response = ClaudeMessageResponse {
+            content: vec![ClaudeContentBlock::ToolUse {
+                id: "toolu_1".to_string(),
+                name: "echo".to_string(),
+                input: json!("not an object"),
+            }],
+        };
+
+        let error = parse_response(response).unwrap_err().to_string();
+
+        assert!(error.contains("invalid tool call arguments"));
+        assert!(error.contains("raw arguments"));
+    }
+
+    #[test]
+    fn response_ignores_non_action_content_blocks() {
+        let response: ClaudeMessageResponse = serde_json::from_value(json!({
+            "content": [
+                {
+                    "type": "thinking",
+                    "thinking": "planning",
+                    "signature": "sig"
+                },
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "echo",
+                    "input": { "text": "hi" }
+                }
+            ]
+        }))
+        .unwrap();
+
+        let message = parse_response(response).unwrap();
+
+        assert_eq!(message.content, "");
+        assert_eq!(message.tool_calls.len(), 1);
+        assert_eq!(message.tool_calls[0].name, "echo");
+    }
+}

@@ -1,7 +1,9 @@
 use rust_tiny_claw::context_engine::ContextManager;
 use rust_tiny_claw::engine::{AgentEngine, RunOptions};
 use rust_tiny_claw::memory::FileMemory;
-use rust_tiny_claw::provider::{MockProvider, OpenAiCompatibleProvider, Provider};
+use rust_tiny_claw::provider::{
+    ClaudeCompatibleProvider, MockProvider, OpenAiCompatibleProvider, Provider,
+};
 use rust_tiny_claw::telemetry::Telemetry;
 use rust_tiny_claw::tools::{EchoTool, ToolRegistry};
 use std::env;
@@ -51,6 +53,7 @@ fn build_provider() -> Result<Box<dyn Provider>, Box<dyn std::error::Error>> {
         .as_str()
     {
         "mock" => Ok(Box::new(MockProvider::default())),
+        "claude-compatible" => Ok(Box::new(ClaudeCompatibleProvider::from_env()?)),
         "openai-compatible" => Ok(Box::new(OpenAiCompatibleProvider::from_env()?)),
         other => Err(format!("unsupported TINY_CLAW_PROVIDER: {other}").into()),
     }

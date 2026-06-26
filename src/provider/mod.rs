@@ -1,8 +1,10 @@
+mod claude_compatible;
 mod openai_compatible;
 
 use crate::schema::{Message, ToolCall, ToolDefinition};
 use serde_json::json;
 
+pub use claude_compatible::ClaudeCompatibleProvider;
 pub use openai_compatible::OpenAiCompatibleProvider;
 
 // Provider is the narrow boundary between the harness and an LLM backend.

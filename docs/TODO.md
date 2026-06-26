@@ -2,7 +2,6 @@
 
 ## Provider
 
-- Add a Claude-compatible provider after the OpenAI-compatible provider is working.
 - Add streaming provider support after the blocking provider is stable.
 - Add provider retry and backoff policy.
 - Consider vendor-specific profiles only after at least two real providers diverge in behavior or configuration.
