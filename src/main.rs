@@ -5,7 +5,7 @@ use rust_tiny_claw::provider::{
     ClaudeCompatibleProvider, MockProvider, OpenAiCompatibleProvider, Provider,
 };
 use rust_tiny_claw::telemetry::Telemetry;
-use rust_tiny_claw::tools::{EchoTool, ToolRegistry};
+use rust_tiny_claw::tools::{ReadFileTool, ToolRegistry};
 use std::env;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -15,9 +15,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let provider = build_provider()?;
 
-    // TODO(ch06-ch08): register real read/write/edit/bash tools behind middleware.
+    let work_dir = env::current_dir()?;
+
+    // TODO(ch06-ch08): register write/edit/bash tools behind middleware.
     let mut registry = ToolRegistry::new();
-    registry.register(EchoTool::default());
+    registry.register(ReadFileTool::new(&work_dir)?)?;
 
     // TODO(ch10-ch15): load AGENTS.md, manage sessions, compact context, inject reminders.
     let context = ContextManager::default();
@@ -43,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("starting two-stage ReAct loop");
     engine.run_with_options(
-        "Call the echo tool exactly once with the text 'workspace tools are wired', then report the observation and finish.",
+        "Call the read_file tool exactly once to read Cargo.toml, then summarize the package name and finish.",
         options,
     )?;
 

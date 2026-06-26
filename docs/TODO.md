@@ -10,6 +10,8 @@
 
 - Later: support a self-correction retry when tool call JSON is invalid.
 - Expand tests for multi-turn tool call histories and provider-specific edge cases.
+- Later: add read-file output truncation/offloading once the basic tool registry and
+  `read_file` flow are working.
 
 ## Runtime
 

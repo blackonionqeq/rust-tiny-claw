@@ -113,24 +113,26 @@ impl Provider for MockProvider {
     ) -> Result<Message, ProviderError> {
         let Some(available_tools) = available_tools else {
             return Ok(Message::assistant(
-                "I should first plan the next step without using tools. The task needs a simple observation, so I will use the echo tool once tools are available.",
+                "I should first plan the next step without using tools. The task needs a workspace file, so I will use read_file once tools are available.",
             ));
         };
 
         self.turn += 1;
 
         if self.turn == 1 {
-            let echo_available = available_tools.iter().any(|tool| tool.name == "echo");
-            if !echo_available {
-                return Err(ProviderError::new("mock provider expected an echo tool"));
+            let read_file_available = available_tools.iter().any(|tool| tool.name == "read_file");
+            if !read_file_available {
+                return Err(ProviderError::new(
+                    "mock provider expected a read_file tool",
+                ));
             }
 
             return Ok(Message::assistant_with_tools(
-                "I will ask the echo tool for a simple observation.",
+                "I will read the workspace manifest.",
                 vec![ToolCall::new(
                     "call_001",
-                    "echo",
-                    json!({ "text": "workspace tools are wired" }),
+                    "read_file",
+                    json!({ "path": "Cargo.toml" }),
                 )],
             ));
         }
