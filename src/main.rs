@@ -5,7 +5,7 @@ use rust_tiny_claw::provider::{
     ClaudeCompatibleProvider, MockProvider, OpenAiCompatibleProvider, Provider,
 };
 use rust_tiny_claw::telemetry::Telemetry;
-use rust_tiny_claw::tools::{ReadFileTool, ToolRegistry};
+use rust_tiny_claw::tools::{BashTool, ReadFileTool, ToolRegistry, WriteFileTool};
 use std::env;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -17,9 +17,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let work_dir = env::current_dir()?;
 
-    // TODO(ch06-ch08): register write/edit/bash tools behind middleware.
     let mut registry = ToolRegistry::new();
     registry.register(ReadFileTool::new(&work_dir)?)?;
+    registry.register(WriteFileTool::new(&work_dir)?)?;
+    registry.register(BashTool::new(&work_dir)?)?;
 
     // TODO(ch10-ch15): load AGENTS.md, manage sessions, compact context, inject reminders.
     let context = ContextManager::default();
@@ -34,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut engine = engine;
 
     let options = RunOptions {
-        max_turns: 4,
+        max_turns: 6,
         enable_thinking: false,
         stream: stream_enabled()?,
     };
@@ -45,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("starting two-stage ReAct loop");
     engine.run_with_options(
-        "Call the read_file tool exactly once to read the first 80 lines of Cargo.lock, then summarize what kind of file it is and finish.",
+        "Smoke-test the lesson 6 minimal tool set: read Cargo.toml, write a small file under .tiny-claw/smoke, then use bash to print that file and confirm the result.",
         options,
     )?;
 

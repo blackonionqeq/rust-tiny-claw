@@ -113,26 +113,60 @@ impl Provider for MockProvider {
     ) -> Result<Message, ProviderError> {
         let Some(available_tools) = available_tools else {
             return Ok(Message::assistant(
-                "I should first plan the next step without using tools. The task needs a workspace file, so I will use read_file once tools are available.",
+                "I should first plan the next step without using tools. The task needs workspace file and shell access, so I will use the minimal local tools once they are available.",
             ));
         };
 
         self.turn += 1;
 
         if self.turn == 1 {
-            let read_file_available = available_tools.iter().any(|tool| tool.name == "read_file");
-            if !read_file_available {
+            if !available_tools.iter().any(|tool| tool.name == "read_file") {
                 return Err(ProviderError::new(
                     "mock provider expected a read_file tool",
                 ));
             }
 
             return Ok(Message::assistant_with_tools(
-                "I will read the start of the lockfile.",
+                "I will read the project manifest first.",
                 vec![ToolCall::new(
                     "call_001",
                     "read_file",
-                    json!({ "path": "Cargo.lock", "start_line": 1, "line_count": 80 }),
+                    json!({ "path": "Cargo.toml", "start_line": 1, "line_count": 80 }),
+                )],
+            ));
+        }
+
+        if self.turn == 2 {
+            if !available_tools.iter().any(|tool| tool.name == "write_file") {
+                return Err(ProviderError::new(
+                    "mock provider expected a write_file tool",
+                ));
+            }
+
+            return Ok(Message::assistant_with_tools(
+                "I will write a small smoke-test file.",
+                vec![ToolCall::new(
+                    "call_002",
+                    "write_file",
+                    json!({
+                        "path": ".tiny-claw/smoke/lesson-06.txt",
+                        "content": "rust-tiny-claw lesson 6 smoke test\n"
+                    }),
+                )],
+            ));
+        }
+
+        if self.turn == 3 {
+            if !available_tools.iter().any(|tool| tool.name == "bash") {
+                return Err(ProviderError::new("mock provider expected a bash tool"));
+            }
+
+            return Ok(Message::assistant_with_tools(
+                "I will verify the smoke-test file through bash.",
+                vec![ToolCall::new(
+                    "call_003",
+                    "bash",
+                    json!({ "command": "cat .tiny-claw/smoke/lesson-06.txt" }),
                 )],
             ));
         }

@@ -3,6 +3,8 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 // Tools expose a model-facing definition and own the execution of their calls.
 pub trait Tool {
@@ -284,12 +286,295 @@ impl Tool for ReadFileTool {
     }
 }
 
+#[derive(Debug)]
+pub struct WriteFileTool {
+    work_dir: PathBuf,
+}
+
+impl WriteFileTool {
+    pub fn new(work_dir: impl Into<PathBuf>) -> Result<Self, std::io::Error> {
+        let work_dir = work_dir.into().canonicalize()?;
+        Ok(Self { work_dir })
+    }
+
+    fn resolve_path_for_write(&self, path: &str) -> Result<PathBuf, String> {
+        let requested = Path::new(path);
+        if requested.is_absolute() {
+            return Err("path must be relative to the workspace".to_string());
+        }
+
+        if requested
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            return Err(format!("path '{path}' must not contain '..'"));
+        }
+
+        let full_path = self.work_dir.join(requested);
+        let Some(parent) = full_path.parent() else {
+            return Err(format!("path '{path}' has no parent directory"));
+        };
+
+        std::fs::create_dir_all(parent).map_err(|error| {
+            format!("failed to create parent directories for '{path}': {error}")
+        })?;
+
+        let resolved_parent = parent
+            .canonicalize()
+            .map_err(|error| format!("failed to resolve parent directory for '{path}': {error}"))?;
+
+        if !resolved_parent.starts_with(&self.work_dir) {
+            return Err(format!("path '{path}' is outside the workspace"));
+        }
+
+        let Some(file_name) = full_path.file_name() else {
+            return Err(format!("path '{path}' must name a file"));
+        };
+
+        Ok(resolved_parent.join(file_name))
+    }
+}
+
+impl Tool for WriteFileTool {
+    fn name(&self) -> &'static str {
+        "write_file"
+    }
+
+    fn description(&self) -> &'static str {
+        "Create or fully overwrite a file inside the current workspace."
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Workspace-relative file path to write, such as src/main.rs."
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Complete file contents to write."
+                }
+            },
+            "required": ["path", "content"]
+        })
+    }
+
+    fn execute(&self, call: &ToolCall) -> ToolResult {
+        let Some(path) = call.arguments.get("path").and_then(|value| value.as_str()) else {
+            return ToolResult::error(call.id.clone(), "missing string argument: path");
+        };
+        let Some(content) = call
+            .arguments
+            .get("content")
+            .and_then(|value| value.as_str())
+        else {
+            return ToolResult::error(call.id.clone(), "missing string argument: content");
+        };
+
+        let resolved = match self.resolve_path_for_write(path) {
+            Ok(path) => path,
+            Err(error) => return ToolResult::error(call.id.clone(), error),
+        };
+
+        match std::fs::write(&resolved, content) {
+            Ok(()) => ToolResult::ok(call.id.clone(), format!("wrote file: {path}")),
+            Err(error) => ToolResult::error(
+                call.id.clone(),
+                format!("failed to write file '{}': {error}", resolved.display()),
+            ),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct BashTool {
+    work_dir: PathBuf,
+    timeout: Duration,
+    max_output_bytes: usize,
+}
+
+impl BashTool {
+    pub fn new(work_dir: impl Into<PathBuf>) -> Result<Self, std::io::Error> {
+        let work_dir = work_dir.into().canonicalize()?;
+        Ok(Self {
+            work_dir,
+            timeout: Duration::from_secs(30),
+            max_output_bytes: 8000,
+        })
+    }
+
+    #[cfg(test)]
+    fn with_limits(
+        work_dir: impl Into<PathBuf>,
+        timeout: Duration,
+        max_output_bytes: usize,
+    ) -> Result<Self, std::io::Error> {
+        let work_dir = work_dir.into().canonicalize()?;
+        Ok(Self {
+            work_dir,
+            timeout,
+            max_output_bytes,
+        })
+    }
+
+    fn command_for_shell(command: &str) -> Command {
+        #[cfg(windows)]
+        {
+            let mut shell = Command::new("bash");
+            shell.arg("-lc").arg(command);
+            shell
+        }
+
+        #[cfg(not(windows))]
+        {
+            let mut shell = Command::new("bash");
+            shell.arg("-lc").arg(command);
+            shell
+        }
+    }
+
+    fn truncate_output(&self, output: String) -> String {
+        if output.len() <= self.max_output_bytes {
+            return output;
+        }
+
+        let mut cutoff = self.max_output_bytes;
+        while !output.is_char_boundary(cutoff) {
+            cutoff -= 1;
+        }
+
+        format!(
+            "{}\n\n...[terminal output truncated to first {} bytes]...",
+            &output[..cutoff],
+            self.max_output_bytes
+        )
+    }
+}
+
+impl Tool for BashTool {
+    fn name(&self) -> &'static str {
+        "bash"
+    }
+
+    fn description(&self) -> &'static str {
+        "Run a bash command in the current workspace and return stdout and stderr."
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "Bash command to run in the workspace, such as cargo test or rg TODO."
+                }
+            },
+            "required": ["command"]
+        })
+    }
+
+    fn execute(&self, call: &ToolCall) -> ToolResult {
+        let Some(command) = call
+            .arguments
+            .get("command")
+            .and_then(|value| value.as_str())
+        else {
+            return ToolResult::error(call.id.clone(), "missing string argument: command");
+        };
+
+        let mut child = match Self::command_for_shell(command)
+            .current_dir(&self.work_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(error) => {
+                return ToolResult::error(
+                    call.id.clone(),
+                    format!("failed to start bash command: {error}"),
+                );
+            }
+        };
+
+        let start = Instant::now();
+        loop {
+            match child.try_wait() {
+                Ok(Some(_status)) => break,
+                Ok(None) if start.elapsed() < self.timeout => {
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+                Ok(None) => {
+                    let _ = child.kill();
+                    let output = child.wait_with_output();
+                    let output = match output {
+                        Ok(output) => {
+                            String::from_utf8_lossy(&output.stdout).to_string()
+                                + &String::from_utf8_lossy(&output.stderr)
+                        }
+                        Err(error) => {
+                            format!("failed to collect timed-out command output: {error}")
+                        }
+                    };
+                    let output = self.truncate_output(output);
+                    return ToolResult::ok(
+                        call.id.clone(),
+                        format!(
+                            "{output}\n[warning: command timed out after {}s and was terminated]",
+                            self.timeout.as_secs()
+                        ),
+                    );
+                }
+                Err(error) => {
+                    return ToolResult::error(
+                        call.id.clone(),
+                        format!("failed while waiting for bash command: {error}"),
+                    );
+                }
+            }
+        }
+
+        let output = match child.wait_with_output() {
+            Ok(output) => output,
+            Err(error) => {
+                return ToolResult::error(
+                    call.id.clone(),
+                    format!("failed to collect bash command output: {error}"),
+                );
+            }
+        };
+
+        let output_text = String::from_utf8_lossy(&output.stdout).to_string()
+            + &String::from_utf8_lossy(&output.stderr);
+        let output_text = if output_text.is_empty() {
+            "command completed successfully with no output".to_string()
+        } else {
+            self.truncate_output(output_text)
+        };
+
+        if output.status.success() {
+            ToolResult::ok(call.id.clone(), output_text)
+        } else {
+            ToolResult::ok(
+                call.id.clone(),
+                format!(
+                    "command exited with status {}\n{output_text}",
+                    output.status
+                ),
+            )
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{EchoTool, ReadFileTool, Tool, ToolRegistry};
+    use super::{BashTool, EchoTool, ReadFileTool, Tool, ToolRegistry, WriteFileTool};
     use crate::schema::ToolCall;
     use serde_json::json;
     use std::fs;
+    use std::time::Duration;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -436,6 +721,119 @@ mod tests {
 
         assert!(result.is_error);
         assert!(result.output.contains("relative"));
+    }
+
+    #[test]
+    fn write_file_creates_parent_directories_and_writes_content() {
+        let work_dir = unique_temp_dir();
+        fs::create_dir_all(&work_dir).unwrap();
+
+        let tool = WriteFileTool::new(&work_dir).unwrap();
+        let result = tool.execute(&ToolCall::new(
+            "call_1",
+            "write_file",
+            json!({ "path": "src/generated.txt", "content": "hello\n" }),
+        ));
+
+        let written = fs::read_to_string(work_dir.join("src/generated.txt")).unwrap();
+        fs::remove_dir_all(&work_dir).unwrap();
+
+        assert!(!result.is_error);
+        assert_eq!(written, "hello\n");
+    }
+
+    #[test]
+    fn write_file_rejects_parent_directory_escape() {
+        let work_dir = unique_temp_dir();
+        fs::create_dir_all(&work_dir).unwrap();
+
+        let tool = WriteFileTool::new(&work_dir).unwrap();
+        let result = tool.execute(&ToolCall::new(
+            "call_1",
+            "write_file",
+            json!({ "path": "../outside.txt", "content": "nope" }),
+        ));
+
+        fs::remove_dir_all(&work_dir).unwrap();
+
+        assert!(result.is_error);
+        assert!(result.output.contains("must not contain '..'"));
+    }
+
+    #[test]
+    fn write_file_rejects_absolute_paths() {
+        let work_dir = unique_temp_dir();
+        fs::create_dir_all(&work_dir).unwrap();
+        let absolute_path = work_dir.join("file.txt");
+
+        let tool = WriteFileTool::new(&work_dir).unwrap();
+        let result = tool.execute(&ToolCall::new(
+            "call_1",
+            "write_file",
+            json!({ "path": absolute_path, "content": "nope" }),
+        ));
+
+        fs::remove_dir_all(&work_dir).unwrap();
+
+        assert!(result.is_error);
+        assert!(result.output.contains("relative"));
+    }
+
+    #[test]
+    fn bash_runs_command_in_workspace() {
+        let work_dir = unique_temp_dir();
+        fs::create_dir_all(&work_dir).unwrap();
+        fs::write(work_dir.join("hello.txt"), "hello").unwrap();
+
+        let tool = BashTool::new(&work_dir).unwrap();
+        let result = tool.execute(&ToolCall::new(
+            "call_1",
+            "bash",
+            json!({ "command": "cat hello.txt" }),
+        ));
+
+        fs::remove_dir_all(&work_dir).unwrap();
+
+        assert!(!result.is_error);
+        assert_eq!(result.output, "hello");
+    }
+
+    #[test]
+    fn bash_returns_non_zero_status_as_observation() {
+        let work_dir = unique_temp_dir();
+        fs::create_dir_all(&work_dir).unwrap();
+
+        let tool = BashTool::new(&work_dir).unwrap();
+        let result = tool.execute(&ToolCall::new(
+            "call_1",
+            "bash",
+            json!({ "command": "echo problem >&2; exit 7" }),
+        ));
+
+        fs::remove_dir_all(&work_dir).unwrap();
+
+        assert!(!result.is_error);
+        assert!(result.output.contains("command exited with status"));
+        assert!(result.output.contains("problem"));
+    }
+
+    #[test]
+    fn bash_truncates_long_output() {
+        let work_dir = unique_temp_dir();
+        fs::create_dir_all(&work_dir).unwrap();
+
+        let tool = BashTool::with_limits(&work_dir, Duration::from_secs(30), 10).unwrap();
+        let result = tool.execute(&ToolCall::new(
+            "call_1",
+            "bash",
+            json!({ "command": "printf abcdefghijklmnopqrstuvwxyz" }),
+        ));
+
+        fs::remove_dir_all(&work_dir).unwrap();
+
+        assert!(!result.is_error);
+        assert!(result.output.starts_with("abcdefghij"));
+        assert!(result.output.contains("truncated"));
     }
 
     fn unique_temp_dir() -> std::path::PathBuf {

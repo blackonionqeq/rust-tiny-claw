@@ -3,9 +3,9 @@
 Rust learning project for building an Agent Harness lesson by lesson.
 
 The current code is an early runnable harness: it wires together the major
-runtime pieces, runs a small two-stage ReAct loop, exposes one placeholder
-`echo` tool, and can use either the mock provider or real OpenAI/Claude-compatible
-HTTP providers.
+runtime pieces, runs a small two-stage ReAct loop, exposes a minimal local tool
+set, and can use either the mock provider or real OpenAI/Claude-compatible HTTP
+providers.
 
 ## Module Map
 
@@ -36,7 +36,22 @@ cargo run
 
 Expected output includes the provider, streaming mode, thinking phase setting,
 registered tools, context manager, memory root, telemetry, and a short ReAct
-exchange through the `echo` tool.
+exchange through the `read_file`, `write_file`, and `bash` tools.
+
+## Tool Set
+
+The harness currently registers the lesson 6 minimal workspace tools:
+
+- `read_file`: reads a workspace-relative file with optional line ranges.
+- `write_file`: creates or fully overwrites a workspace-relative file, creating
+  parent directories as needed.
+- `bash`: runs a bash command from the workspace, combines stdout/stderr, returns
+  non-zero exits as observations for model self-correction, applies a 30-second
+  timeout, and truncates long output.
+
+`read_file` and `write_file` reject absolute paths and paths that escape the
+workspace. `bash` follows the course's local YOLO execution model, but still
+binds execution to the workspace and enforces resource limits.
 
 ## Provider Configuration
 
