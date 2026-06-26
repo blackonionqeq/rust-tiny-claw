@@ -12,6 +12,9 @@
 - Later: add explicit background task tools (`start_bg_task`, `read_bg_task`,
   `stop_bg_task`, `list_bg_tasks`) for long-running local commands; see
   `docs/background-task-notes.md`.
+- Later: consider a workspace search tool backed by ripgrep, returning matching
+  file paths, line numbers, and small context windows so models can locate code
+  before calling `read_file` and `edit_file`.
 - Expand tests for multi-turn tool call histories and provider-specific edge cases.
 - Later: evaluate head/tail previews and shared tool-output offloading on top of
   the existing ranged `read_file` support.
