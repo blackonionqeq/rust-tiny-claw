@@ -1,5 +1,6 @@
 mod claude_compatible;
 mod openai_compatible;
+mod sse;
 
 use crate::schema::{Message, ToolCall, ToolDefinition};
 use serde_json::json;
@@ -19,6 +20,19 @@ pub trait Provider {
         messages: &[Message],
         available_tools: Option<&[ToolDefinition]>,
     ) -> Result<Message, ProviderError>;
+
+    fn generate_stream(
+        &mut self,
+        messages: &[Message],
+        available_tools: Option<&[ToolDefinition]>,
+        sink: &mut dyn StreamSink,
+    ) -> Result<Message, ProviderError> {
+        let message = self.generate(messages, available_tools)?;
+        if !message.content.is_empty() {
+            sink.on_text(&message.content)?;
+        }
+        Ok(message)
+    }
 }
 
 impl<T> Provider for Box<T>
@@ -35,6 +49,28 @@ where
         available_tools: Option<&[ToolDefinition]>,
     ) -> Result<Message, ProviderError> {
         (**self).generate(messages, available_tools)
+    }
+
+    fn generate_stream(
+        &mut self,
+        messages: &[Message],
+        available_tools: Option<&[ToolDefinition]>,
+        sink: &mut dyn StreamSink,
+    ) -> Result<Message, ProviderError> {
+        (**self).generate_stream(messages, available_tools, sink)
+    }
+}
+
+pub trait StreamSink {
+    fn on_text(&mut self, text: &str) -> Result<(), ProviderError>;
+}
+
+pub struct StdoutStreamSink;
+
+impl StreamSink for StdoutStreamSink {
+    fn on_text(&mut self, text: &str) -> Result<(), ProviderError> {
+        print!("{text}");
+        Ok(())
     }
 }
 

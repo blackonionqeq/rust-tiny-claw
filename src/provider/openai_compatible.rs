@@ -1,4 +1,5 @@
-use crate::provider::{Provider, ProviderError};
+use crate::provider::sse::read_sse_data_lines;
+use crate::provider::{Provider, ProviderError, StreamSink};
 use crate::schema::{Message, Role, ToolCall, ToolDefinition};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -106,6 +107,45 @@ impl Provider for OpenAiCompatibleProvider {
 
         parse_response(response)
     }
+
+    fn generate_stream(
+        &mut self,
+        messages: &[Message],
+        available_tools: Option<&[ToolDefinition]>,
+        sink: &mut dyn StreamSink,
+    ) -> Result<Message, ProviderError> {
+        let request = build_stream_request(&self.config.model, messages, available_tools)?;
+        let response = self
+            .client
+            .post(self.endpoint())
+            .bearer_auth(&self.config.api_key)
+            .json(&request)
+            .send()
+            .map_err(|error| ProviderError::new(format!("provider request failed: {error}")))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().map_err(|error| {
+                ProviderError::new(format!("failed to read response body: {error}"))
+            })?;
+            return Err(ProviderError::new(format!(
+                "provider returned HTTP {status}: {body}"
+            )));
+        }
+
+        let mut state = OpenAiStreamState::default();
+        read_sse_data_lines(response, |data| {
+            let chunk: ChatCompletionStreamChunk = serde_json::from_str(data).map_err(|error| {
+                ProviderError::new(format!(
+                    "failed to parse provider stream chunk: {error}; raw chunk: {data}"
+                ))
+            })?;
+
+            state.apply(chunk, sink)
+        })?;
+
+        state.into_message()
+    }
 }
 
 fn required_env(name: &str) -> Result<String, ProviderError> {
@@ -136,6 +176,16 @@ fn build_request(
         tools,
         stream: false,
     })
+}
+
+fn build_stream_request(
+    model: &str,
+    messages: &[Message],
+    available_tools: Option<&[ToolDefinition]>,
+) -> Result<ChatCompletionRequest, ProviderError> {
+    let mut request = build_request(model, messages, available_tools)?;
+    request.stream = true;
+    Ok(request)
 }
 
 fn to_openai_message(message: &Message) -> Result<OpenAiMessage, ProviderError> {
@@ -305,6 +355,111 @@ struct ChatCompletionToolCallFunction {
     arguments: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct ChatCompletionStreamChunk {
+    choices: Vec<ChatCompletionStreamChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatCompletionStreamChoice {
+    delta: ChatCompletionStreamDelta,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatCompletionStreamDelta {
+    content: Option<String>,
+    tool_calls: Option<Vec<ChatCompletionStreamToolCall>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatCompletionStreamToolCall {
+    index: usize,
+    id: Option<String>,
+    function: Option<ChatCompletionStreamToolCallFunction>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatCompletionStreamToolCallFunction {
+    name: Option<String>,
+    arguments: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct OpenAiStreamState {
+    content: String,
+    tool_calls: Vec<OpenAiStreamToolCallState>,
+}
+
+#[derive(Debug, Default)]
+struct OpenAiStreamToolCallState {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+impl OpenAiStreamState {
+    fn apply(
+        &mut self,
+        chunk: ChatCompletionStreamChunk,
+        sink: &mut dyn StreamSink,
+    ) -> Result<(), ProviderError> {
+        for choice in chunk.choices {
+            if let Some(content) = choice.delta.content {
+                sink.on_text(&content)?;
+                self.content.push_str(&content);
+            }
+
+            for tool_call in choice.delta.tool_calls.unwrap_or_default() {
+                while self.tool_calls.len() <= tool_call.index {
+                    self.tool_calls.push(OpenAiStreamToolCallState::default());
+                }
+
+                let state = &mut self.tool_calls[tool_call.index];
+                if let Some(id) = tool_call.id {
+                    state.id = id;
+                }
+
+                if let Some(function) = tool_call.function {
+                    if let Some(name) = function.name {
+                        state.name = name;
+                    }
+
+                    if let Some(arguments) = function.arguments {
+                        state.arguments.push_str(&arguments);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn into_message(self) -> Result<Message, ProviderError> {
+        let tool_calls = self
+            .tool_calls
+            .into_iter()
+            .filter(|tool_call| !tool_call.id.is_empty() || !tool_call.name.is_empty())
+            .map(|tool_call| {
+                let arguments =
+                    serde_json::from_str::<Value>(&tool_call.arguments).map_err(|error| {
+                        ProviderError::new(format!(
+                            "invalid tool call arguments for tool '{}': {error}; raw arguments: {}",
+                            tool_call.name, tool_call.arguments
+                        ))
+                    })?;
+
+                Ok(ToolCall::new(tool_call.id, tool_call.name, arguments))
+            })
+            .collect::<Result<Vec<_>, ProviderError>>()?;
+
+        if tool_calls.is_empty() {
+            Ok(Message::assistant(self.content))
+        } else {
+            Ok(Message::assistant_with_tools(self.content, tool_calls))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -399,5 +554,96 @@ mod tests {
 
         assert!(error.contains("invalid tool call arguments"));
         assert!(error.contains("raw arguments"));
+    }
+
+    #[test]
+    fn stream_chunks_reconstruct_text_message() {
+        let chunks = vec![
+            ChatCompletionStreamChunk {
+                choices: vec![ChatCompletionStreamChoice {
+                    delta: ChatCompletionStreamDelta {
+                        content: Some("hel".to_string()),
+                        tool_calls: None,
+                    },
+                }],
+            },
+            ChatCompletionStreamChunk {
+                choices: vec![ChatCompletionStreamChoice {
+                    delta: ChatCompletionStreamDelta {
+                        content: Some("lo".to_string()),
+                        tool_calls: None,
+                    },
+                }],
+            },
+        ];
+        let mut state = OpenAiStreamState::default();
+        let mut sink = TestSink::default();
+
+        for chunk in chunks {
+            state.apply(chunk, &mut sink).unwrap();
+        }
+
+        let message = state.into_message().unwrap();
+        assert_eq!(message.content, "hello");
+        assert_eq!(sink.output, "hello");
+    }
+
+    #[test]
+    fn stream_chunks_reconstruct_tool_call() {
+        let chunks = vec![
+            ChatCompletionStreamChunk {
+                choices: vec![ChatCompletionStreamChoice {
+                    delta: ChatCompletionStreamDelta {
+                        content: None,
+                        tool_calls: Some(vec![ChatCompletionStreamToolCall {
+                            index: 0,
+                            id: Some("call_1".to_string()),
+                            function: Some(ChatCompletionStreamToolCallFunction {
+                                name: Some("echo".to_string()),
+                                arguments: Some(r#"{"text":"#.to_string()),
+                            }),
+                        }]),
+                    },
+                }],
+            },
+            ChatCompletionStreamChunk {
+                choices: vec![ChatCompletionStreamChoice {
+                    delta: ChatCompletionStreamDelta {
+                        content: None,
+                        tool_calls: Some(vec![ChatCompletionStreamToolCall {
+                            index: 0,
+                            id: None,
+                            function: Some(ChatCompletionStreamToolCallFunction {
+                                name: None,
+                                arguments: Some(r#""hi"}"#.to_string()),
+                            }),
+                        }]),
+                    },
+                }],
+            },
+        ];
+        let mut state = OpenAiStreamState::default();
+        let mut sink = TestSink::default();
+
+        for chunk in chunks {
+            state.apply(chunk, &mut sink).unwrap();
+        }
+
+        let message = state.into_message().unwrap();
+        assert_eq!(message.tool_calls.len(), 1);
+        assert_eq!(message.tool_calls[0].id, "call_1");
+        assert_eq!(message.tool_calls[0].arguments, json!({ "text": "hi" }));
+    }
+
+    #[derive(Default)]
+    struct TestSink {
+        output: String,
+    }
+
+    impl StreamSink for TestSink {
+        fn on_text(&mut self, text: &str) -> Result<(), ProviderError> {
+            self.output.push_str(text);
+            Ok(())
+        }
     }
 }

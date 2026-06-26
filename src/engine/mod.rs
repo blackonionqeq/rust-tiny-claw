@@ -1,6 +1,6 @@
 use crate::context_engine::ContextManager;
 use crate::memory::FileMemory;
-use crate::provider::{Provider, ProviderError};
+use crate::provider::{Provider, ProviderError, StdoutStreamSink};
 use crate::schema::Message;
 use crate::telemetry::Telemetry;
 use crate::tools::ToolRegistry;
@@ -34,15 +34,21 @@ where
         }
     }
 
-    pub fn boot_plan(&self) -> Vec<String> {
+    pub fn boot_plan(&self, options: RunOptions) -> Vec<String> {
         vec![
             format!("provider: {}", self.provider.name()),
+            format!("streaming: {}", options.stream),
+            format!("thinking phase: {}", options.enable_thinking),
             format!("tools registered: {}", self.registry.len()),
             format!("context manager: {}", self.context.name()),
             format!("memory root: {}", self.memory.root().display()),
             format!("telemetry: {}", self.telemetry.name()),
             "two-stage ReAct loop available".to_string(),
         ]
+    }
+
+    pub fn boot_plan_default(&self) -> Vec<String> {
+        self.boot_plan(RunOptions::default())
     }
 
     pub fn run(&mut self, user_prompt: impl Into<String>) -> Result<Vec<Message>, EngineError> {
@@ -72,17 +78,41 @@ where
 
                 // Phase 1: hide the tool schema so the provider cannot emit tool calls.
                 // This is distinct from passing an empty tool list to an enabled tool mode.
-                let thinking = self.provider.generate(&messages, None)?;
-                if !thinking.content.is_empty() {
+                let thinking = if options.stream {
+                    let mut sink = StdoutStreamSink;
+                    let thinking = self.provider.generate_stream(&messages, None, &mut sink)?;
+                    if !thinking.content.is_empty() {
+                        println!();
+                    }
+                    thinking
+                } else {
+                    self.provider.generate(&messages, None)?
+                };
+
+                if !thinking.content.is_empty() && !options.stream {
                     println!("thinking: {}", thinking.content);
+                }
+
+                if !thinking.content.is_empty() {
                     messages.push(thinking);
                 }
             }
 
             // Phase 2: restore tool access and let the provider act on the accumulated context.
-            let response = self.provider.generate(&messages, Some(&available_tools))?;
+            let response = if options.stream {
+                let mut sink = StdoutStreamSink;
+                let response =
+                    self.provider
+                        .generate_stream(&messages, Some(&available_tools), &mut sink)?;
+                if !response.content.is_empty() {
+                    println!();
+                }
+                response
+            } else {
+                self.provider.generate(&messages, Some(&available_tools))?
+            };
 
-            if !response.content.is_empty() {
+            if !response.content.is_empty() && !options.stream {
                 println!("assistant: {}", response.content);
             }
 
@@ -124,6 +154,7 @@ where
 pub struct RunOptions {
     pub max_turns: usize,
     pub enable_thinking: bool,
+    pub stream: bool,
 }
 
 impl Default for RunOptions {
@@ -131,6 +162,7 @@ impl Default for RunOptions {
         Self {
             max_turns: 16,
             enable_thinking: false,
+            stream: true,
         }
     }
 }

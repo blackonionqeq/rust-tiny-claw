@@ -1,4 +1,5 @@
-use crate::provider::{Provider, ProviderError};
+use crate::provider::sse::read_sse_data_lines;
+use crate::provider::{Provider, ProviderError, StreamSink};
 use crate::schema::{Message, Role, ToolCall, ToolDefinition};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -114,6 +115,51 @@ impl Provider for ClaudeCompatibleProvider {
 
         parse_response(response)
     }
+
+    fn generate_stream(
+        &mut self,
+        messages: &[Message],
+        available_tools: Option<&[ToolDefinition]>,
+        sink: &mut dyn StreamSink,
+    ) -> Result<Message, ProviderError> {
+        let request = build_stream_request(
+            &self.config.model,
+            self.config.max_tokens,
+            messages,
+            available_tools,
+        )?;
+        let response = self
+            .client
+            .post(self.endpoint())
+            .header("x-api-key", &self.config.api_key)
+            .header("anthropic-version", &self.config.anthropic_version)
+            .json(&request)
+            .send()
+            .map_err(|error| ProviderError::new(format!("provider request failed: {error}")))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().map_err(|error| {
+                ProviderError::new(format!("failed to read response body: {error}"))
+            })?;
+            return Err(ProviderError::new(format!(
+                "provider returned HTTP {status}: {body}"
+            )));
+        }
+
+        let mut state = ClaudeStreamState::default();
+        read_sse_data_lines(response, |data| {
+            let event: ClaudeStreamEvent = serde_json::from_str(data).map_err(|error| {
+                ProviderError::new(format!(
+                    "failed to parse provider stream chunk: {error}; raw chunk: {data}"
+                ))
+            })?;
+
+            state.apply(event, sink)
+        })?;
+
+        state.into_message()
+    }
 }
 
 fn required_env(name: &str) -> Result<String, ProviderError> {
@@ -174,6 +220,17 @@ fn build_request(
         tools,
         stream: false,
     })
+}
+
+fn build_stream_request(
+    model: &str,
+    max_tokens: u64,
+    messages: &[Message],
+    available_tools: Option<&[ToolDefinition]>,
+) -> Result<ClaudeMessageRequest, ProviderError> {
+    let mut request = build_request(model, max_tokens, messages, available_tools)?;
+    request.stream = true;
+    Ok(request)
 }
 
 fn to_claude_user_message(message: &Message) -> ClaudeMessageParam {
@@ -338,6 +395,134 @@ enum ClaudeContentBlock {
     Other,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+enum ClaudeStreamEvent {
+    #[serde(rename = "content_block_start")]
+    ContentBlockStart {
+        index: usize,
+        content_block: ClaudeStreamContentBlockStart,
+    },
+    #[serde(rename = "content_block_delta")]
+    ContentBlockDelta {
+        index: usize,
+        delta: ClaudeStreamDelta,
+    },
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+enum ClaudeStreamContentBlockStart {
+    #[serde(rename = "tool_use")]
+    ToolUse { id: String, name: String },
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+enum ClaudeStreamDelta {
+    #[serde(rename = "text_delta")]
+    Text { text: String },
+    #[serde(rename = "input_json_delta")]
+    InputJson { partial_json: String },
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Debug, Default)]
+struct ClaudeStreamState {
+    content: String,
+    tool_calls: Vec<ClaudeStreamToolCallState>,
+}
+
+#[derive(Debug, Default)]
+struct ClaudeStreamToolCallState {
+    index: usize,
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+impl ClaudeStreamState {
+    fn apply(
+        &mut self,
+        event: ClaudeStreamEvent,
+        sink: &mut dyn StreamSink,
+    ) -> Result<(), ProviderError> {
+        match event {
+            ClaudeStreamEvent::ContentBlockStart {
+                index,
+                content_block: ClaudeStreamContentBlockStart::ToolUse { id, name },
+            } => {
+                self.tool_calls.push(ClaudeStreamToolCallState {
+                    index,
+                    id,
+                    name,
+                    arguments: String::new(),
+                });
+            }
+            ClaudeStreamEvent::ContentBlockDelta {
+                delta: ClaudeStreamDelta::Text { text },
+                ..
+            } => {
+                sink.on_text(&text)?;
+                self.content.push_str(&text);
+            }
+            ClaudeStreamEvent::ContentBlockDelta {
+                index,
+                delta: ClaudeStreamDelta::InputJson { partial_json },
+            } => {
+                if let Some(tool_call) = self
+                    .tool_calls
+                    .iter_mut()
+                    .find(|tool_call| tool_call.index == index)
+                {
+                    tool_call.arguments.push_str(&partial_json);
+                }
+            }
+            ClaudeStreamEvent::ContentBlockStart { .. }
+            | ClaudeStreamEvent::ContentBlockDelta { .. }
+            | ClaudeStreamEvent::Other => {}
+        }
+
+        Ok(())
+    }
+
+    fn into_message(self) -> Result<Message, ProviderError> {
+        let tool_calls = self
+            .tool_calls
+            .into_iter()
+            .map(|tool_call| {
+                let arguments =
+                    serde_json::from_str::<Value>(&tool_call.arguments).map_err(|error| {
+                        ProviderError::new(format!(
+                            "invalid tool call arguments for tool '{}': {error}; raw arguments: {}",
+                            tool_call.name, tool_call.arguments
+                        ))
+                    })?;
+
+                if !arguments.is_object() {
+                    return Err(ProviderError::new(format!(
+                        "invalid tool call arguments for tool '{}': expected JSON object; raw arguments: {arguments}",
+                        tool_call.name
+                    )));
+                }
+
+                Ok(ToolCall::new(tool_call.id, tool_call.name, arguments))
+            })
+            .collect::<Result<Vec<_>, ProviderError>>()?;
+
+        if tool_calls.is_empty() {
+            Ok(Message::assistant(self.content))
+        } else {
+            Ok(Message::assistant_with_tools(self.content, tool_calls))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -466,5 +651,81 @@ mod tests {
         assert_eq!(message.content, "");
         assert_eq!(message.tool_calls.len(), 1);
         assert_eq!(message.tool_calls[0].name, "echo");
+    }
+
+    #[test]
+    fn stream_events_reconstruct_text_message() {
+        let events = vec![
+            ClaudeStreamEvent::ContentBlockDelta {
+                index: 0,
+                delta: ClaudeStreamDelta::Text {
+                    text: "hel".to_string(),
+                },
+            },
+            ClaudeStreamEvent::ContentBlockDelta {
+                index: 0,
+                delta: ClaudeStreamDelta::Text {
+                    text: "lo".to_string(),
+                },
+            },
+        ];
+        let mut state = ClaudeStreamState::default();
+        let mut sink = TestSink::default();
+
+        for event in events {
+            state.apply(event, &mut sink).unwrap();
+        }
+
+        let message = state.into_message().unwrap();
+        assert_eq!(message.content, "hello");
+        assert_eq!(sink.output, "hello");
+    }
+
+    #[test]
+    fn stream_events_reconstruct_tool_call() {
+        let events = vec![
+            ClaudeStreamEvent::ContentBlockStart {
+                index: 1,
+                content_block: ClaudeStreamContentBlockStart::ToolUse {
+                    id: "toolu_1".to_string(),
+                    name: "echo".to_string(),
+                },
+            },
+            ClaudeStreamEvent::ContentBlockDelta {
+                index: 1,
+                delta: ClaudeStreamDelta::InputJson {
+                    partial_json: r#"{"text":"#.to_string(),
+                },
+            },
+            ClaudeStreamEvent::ContentBlockDelta {
+                index: 1,
+                delta: ClaudeStreamDelta::InputJson {
+                    partial_json: r#""hi"}"#.to_string(),
+                },
+            },
+        ];
+        let mut state = ClaudeStreamState::default();
+        let mut sink = TestSink::default();
+
+        for event in events {
+            state.apply(event, &mut sink).unwrap();
+        }
+
+        let message = state.into_message().unwrap();
+        assert_eq!(message.tool_calls.len(), 1);
+        assert_eq!(message.tool_calls[0].id, "toolu_1");
+        assert_eq!(message.tool_calls[0].arguments, json!({ "text": "hi" }));
+    }
+
+    #[derive(Default)]
+    struct TestSink {
+        output: String,
+    }
+
+    impl StreamSink for TestSink {
+        fn on_text(&mut self, text: &str) -> Result<(), ProviderError> {
+            self.output.push_str(text);
+            Ok(())
+        }
     }
 }

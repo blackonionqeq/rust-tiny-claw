@@ -31,20 +31,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine = AgentEngine::new(provider, registry, context, memory, telemetry);
     let mut engine = engine;
 
-    for line in engine.boot_plan() {
+    let options = RunOptions {
+        max_turns: 4,
+        enable_thinking: false,
+        stream: stream_enabled()?,
+    };
+
+    for line in engine.boot_plan(options) {
         println!("- {line}");
     }
 
     println!("starting two-stage ReAct loop");
     engine.run_with_options(
         "Call the echo tool exactly once with the text 'workspace tools are wired', then report the observation and finish.",
-        RunOptions {
-            max_turns: 4,
-            enable_thinking: false,
-        },
+        options,
     )?;
 
     Ok(())
+}
+
+fn stream_enabled() -> Result<bool, Box<dyn std::error::Error>> {
+    match env::var("TINY_CLAW_STREAM") {
+        Ok(value) => parse_bool_env("TINY_CLAW_STREAM", &value),
+        Err(_) => Ok(true),
+    }
+}
+
+fn parse_bool_env(name: &str, value: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    match value {
+        "1" | "true" | "TRUE" | "True" | "yes" | "YES" | "Yes" => Ok(true),
+        "0" | "false" | "FALSE" | "False" | "no" | "NO" | "No" => Ok(false),
+        _ => Err(format!("invalid {name} value: {value}").into()),
+    }
 }
 
 fn build_provider() -> Result<Box<dyn Provider>, Box<dyn std::error::Error>> {
