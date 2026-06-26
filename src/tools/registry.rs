@@ -1,9 +1,10 @@
 use crate::schema::{ToolCall, ToolDefinition, ToolResult};
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 
 // Tools expose a model-facing definition and own the execution of their calls.
-pub trait Tool {
+pub trait Tool: Send + Sync {
     fn name(&self) -> &'static str;
     fn description(&self) -> &'static str;
     fn input_schema(&self) -> serde_json::Value;
@@ -12,7 +13,7 @@ pub trait Tool {
 
 #[derive(Default)]
 pub struct ToolRegistry {
-    tools: HashMap<&'static str, Box<dyn Tool>>,
+    tools: HashMap<&'static str, Arc<dyn Tool>>,
 }
 
 impl ToolRegistry {
@@ -29,7 +30,7 @@ impl ToolRegistry {
             return Err(ToolRegistryError::DuplicateTool { name });
         }
 
-        self.tools.insert(name, Box::new(tool));
+        self.tools.insert(name, Arc::new(tool));
         Ok(())
     }
 

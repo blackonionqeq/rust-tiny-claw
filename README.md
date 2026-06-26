@@ -4,8 +4,8 @@ Rust learning project for building an Agent Harness lesson by lesson.
 
 The current code is an early runnable harness: it wires together the major
 runtime pieces, runs a small two-stage ReAct loop, exposes a minimal local tool
-set, and can use either the mock provider or real OpenAI/Claude-compatible HTTP
-providers.
+set, executes same-turn tool batches in parallel, and can use either the mock
+provider or real OpenAI/Claude-compatible HTTP providers.
 
 ## Module Map
 
@@ -37,11 +37,24 @@ cargo run
 Expected output includes the provider, streaming mode, thinking phase setting,
 registered tools, context manager, memory root, telemetry, and a short ReAct
 exchange that creates an indented smoke-test file, edits it with `edit_file`,
-and reads it back for verification.
+reads it back for verification, then requests multiple independent `read_file`
+calls in one turn so the engine exercises parallel tool dispatch.
+
+## Tool Dispatch
+
+The harness supports lesson 8 parallel tool calling. When a provider returns
+more than one tool call in the same assistant message, the engine forks those
+calls onto scoped Rust threads, waits for all of them to finish, then appends
+the observations in the original tool-call order.
+
+This implementation intentionally follows the course scope: it trusts the
+model's same-turn independence assumption and does not yet add path-based file
+locks, read/write batch classification, async file APIs, or a global concurrency
+limit. Those are production hardening topics for later lessons.
 
 ## Tool Set
 
-The harness currently registers the lesson 7 workspace tools:
+The harness currently registers the lesson 8 workspace tools:
 
 - `read_file`: reads a workspace-relative file with optional line ranges.
 - `write_file`: creates or fully overwrites a workspace-relative file, creating

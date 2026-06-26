@@ -1,10 +1,13 @@
 use crate::context_engine::ContextManager;
 use crate::memory::FileMemory;
 use crate::provider::{Provider, ProviderError, StdoutStreamSink};
-use crate::schema::Message;
+use crate::schema::{Message, ToolCall, ToolResult};
 use crate::telemetry::Telemetry;
 use crate::tools::ToolRegistry;
 use std::fmt;
+
+#[cfg(test)]
+mod tests;
 
 pub struct AgentEngine<P> {
     provider: P,
@@ -128,12 +131,8 @@ where
 
             println!("[engine] requested {} tool call(s)", tool_calls.len());
 
-            for tool_call in tool_calls {
-                println!("[action] {} {}", tool_call.name, tool_call.arguments);
-
-                // Act and observe: the engine only dispatches the call. Tool-specific
-                // argument parsing and execution stay inside the tool layer.
-                let result = self.registry.execute(&tool_call);
+            let results = self.execute_tool_batch(&tool_calls);
+            for result in results {
                 if result.is_error {
                     println!("[observation:error] {}", result.output);
                 } else {
@@ -148,6 +147,57 @@ where
             max_turns: options.max_turns,
         })
     }
+
+    fn execute_tool_batch(&self, tool_calls: &[ToolCall]) -> Vec<ToolResult> {
+        if tool_calls.len() <= 1 {
+            return tool_calls
+                .iter()
+                .map(|tool_call| self.execute_one_tool(tool_call))
+                .collect();
+        }
+
+        println!("[engine] executing tools in parallel");
+
+        // Scoped threads let the batch borrow the immutable registry instead of
+        // forcing the whole engine/provider stack into 'static shared ownership.
+        let registry = &self.registry;
+        std::thread::scope(|scope| {
+            let handles = tool_calls
+                .iter()
+                .map(|tool_call| {
+                    (
+                        tool_call.id.clone(),
+                        scope.spawn(move || execute_one_tool(registry, tool_call)),
+                    )
+                })
+                .collect::<Vec<_>>();
+
+            // Join in the original tool-call order so the model receives
+            // observations aligned with the action list it produced.
+            handles
+                .into_iter()
+                .map(|(tool_call_id, handle)| match handle.join() {
+                    Ok(result) => result,
+                    Err(_) => ToolResult::error(
+                        tool_call_id,
+                        "tool execution panicked before returning a result",
+                    ),
+                })
+                .collect()
+        })
+    }
+
+    fn execute_one_tool(&self, tool_call: &ToolCall) -> ToolResult {
+        execute_one_tool(&self.registry, tool_call)
+    }
+}
+
+fn execute_one_tool(registry: &ToolRegistry, tool_call: &ToolCall) -> ToolResult {
+    println!("[action] {} {}", tool_call.name, tool_call.arguments);
+
+    // Act and observe: the engine only dispatches the call. Tool-specific
+    // argument parsing and execution stay inside the tool layer.
+    registry.execute(tool_call)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -194,6 +194,35 @@ impl Provider for MockProvider {
             ));
         }
 
+        if self.turn == 5 {
+            if !available_tools.iter().any(|tool| tool.name == "read_file") {
+                return Err(ProviderError::new(
+                    "mock provider expected a read_file tool",
+                ));
+            }
+
+            return Ok(Message::assistant_with_tools(
+                "I will read three independent project files in one batch to exercise parallel tool dispatch.",
+                vec![
+                    ToolCall::new(
+                        "call_005_a",
+                        "read_file",
+                        json!({ "path": "Cargo.toml", "start_line": 1, "line_count": 80 }),
+                    ),
+                    ToolCall::new(
+                        "call_005_b",
+                        "read_file",
+                        json!({ "path": "README.md", "start_line": 1, "line_count": 80 }),
+                    ),
+                    ToolCall::new(
+                        "call_005_c",
+                        "read_file",
+                        json!({ "path": "src/main.rs", "start_line": 1, "line_count": 80 }),
+                    ),
+                ],
+            ));
+        }
+
         let last_observation = messages
             .iter()
             .rev()
