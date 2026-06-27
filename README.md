@@ -8,10 +8,10 @@ built-in mock provider plus OpenAI/Claude-compatible HTTP providers.
 
 ## Run
 
-Use WSL Ubuntu for the full build/check path:
+Use WSL Ubuntu from the repository root for the full build/check path:
 
 ```powershell
-wsl -d Ubuntu -- bash -lc "cd /mnt/d/codes/rust-projects/rust-tiny-claw && cargo fmt --check && cargo check"
+wsl -d Ubuntu -- bash -lc "cargo fmt --check && cargo check"
 ```
 
 For a quick type check from Windows PowerShell, `cargo check` is usually enough.
@@ -23,13 +23,13 @@ real provider, plain `cargo run` will use that provider.
 To force the deterministic mock smoke run without an API key:
 
 ```powershell
-wsl -d Ubuntu -- bash -lc "cd /mnt/d/codes/rust-projects/rust-tiny-claw && TINY_CLAW_PROVIDER=mock cargo run"
+wsl -d Ubuntu -- bash -lc "TINY_CLAW_PROVIDER=mock cargo run"
 ```
 
 To run with the provider configured in `.env`:
 
 ```powershell
-wsl -d Ubuntu -- bash -lc "cd /mnt/d/codes/rust-projects/rust-tiny-claw && cargo run"
+wsl -d Ubuntu -- bash -lc "cargo run"
 ```
 
 The mock smoke run creates an indented file, edits it with `edit_file`, verifies
