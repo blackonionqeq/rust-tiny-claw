@@ -1,6 +1,8 @@
 use crate::context_engine::ContextManager;
 use crate::memory::FileMemory;
 use crate::provider::{Provider, ProviderError, StdoutStreamSink};
+use crate::reporter::terminal::TerminalReporter;
+use crate::reporter::{Reporter, ReporterError};
 use crate::schema::{Message, ToolCall, ToolResult};
 use crate::telemetry::Telemetry;
 use crate::tools::ToolRegistry;
@@ -63,6 +65,16 @@ where
         user_prompt: impl Into<String>,
         options: RunOptions,
     ) -> Result<Vec<Message>, EngineError> {
+        let mut reporter = TerminalReporter;
+        self.run_with_reporter(user_prompt, options, &mut reporter)
+    }
+
+    pub fn run_with_reporter(
+        &mut self,
+        user_prompt: impl Into<String>,
+        options: RunOptions,
+        reporter: &mut dyn Reporter,
+    ) -> Result<Vec<Message>, EngineError> {
         // The message list is the agent's short-term memory for this lesson.
         // Later chapters can move prompt loading and compaction into ContextManager.
         let mut messages = vec![
@@ -73,11 +85,11 @@ where
         ];
 
         for turn in 1..=options.max_turns {
-            println!("[turn {turn}] reasoning");
+            reporter.on_turn_start(turn)?;
 
             let available_tools = self.registry.definitions();
             if options.enable_thinking {
-                println!("[thinking] tools disabled");
+                reporter.on_thinking_start()?;
 
                 // Phase 1: hide the tool schema so the provider cannot emit tool calls.
                 // This is distinct from passing an empty tool list to an enabled tool mode.
@@ -93,7 +105,7 @@ where
                 };
 
                 if !thinking.content.is_empty() && !options.stream {
-                    println!("thinking: {}", thinking.content);
+                    reporter.on_thinking(&thinking.content)?;
                 }
 
                 if !thinking.content.is_empty() {
@@ -116,7 +128,7 @@ where
             };
 
             if !response.content.is_empty() && !options.stream {
-                println!("assistant: {}", response.content);
+                reporter.on_assistant_message(&response.content)?;
             }
 
             // Keep the provider's response before appending tool observations so the
@@ -125,19 +137,15 @@ where
             messages.push(response);
 
             if tool_calls.is_empty() {
-                println!("[engine] task complete");
+                reporter.on_complete()?;
                 return Ok(messages);
             }
 
-            println!("[engine] requested {} tool call(s)", tool_calls.len());
+            reporter.on_tool_calls(&tool_calls)?;
 
-            let results = self.execute_tool_batch(&tool_calls);
+            let results = self.execute_tool_batch_with_reporter(&tool_calls, reporter)?;
             for result in results {
-                if result.is_error {
-                    println!("[observation:error] {}", result.output);
-                } else {
-                    println!("[observation] {}", result.output);
-                }
+                reporter.on_tool_result(&result)?;
 
                 messages.push(Message::observation(result.tool_call_id, result.output));
             }
@@ -148,15 +156,34 @@ where
         })
     }
 
+    #[cfg(test)]
     fn execute_tool_batch(&self, tool_calls: &[ToolCall]) -> Vec<ToolResult> {
+        self.execute_tool_batch_internal(tool_calls)
+    }
+
+    fn execute_tool_batch_with_reporter(
+        &self,
+        tool_calls: &[ToolCall],
+        reporter: &mut dyn Reporter,
+    ) -> Result<Vec<ToolResult>, EngineError> {
+        if tool_calls.len() <= 1 || !self.can_execute_in_parallel(tool_calls) {
+            return Ok(tool_calls
+                .iter()
+                .map(|tool_call| self.execute_one_tool(tool_call))
+                .collect());
+        }
+
+        reporter.on_parallel_tool_batch()?;
+        Ok(self.execute_tool_batch_internal(tool_calls))
+    }
+
+    fn execute_tool_batch_internal(&self, tool_calls: &[ToolCall]) -> Vec<ToolResult> {
         if tool_calls.len() <= 1 || !self.can_execute_in_parallel(tool_calls) {
             return tool_calls
                 .iter()
                 .map(|tool_call| self.execute_one_tool(tool_call))
                 .collect();
         }
-
-        println!("[engine] executing tools in parallel");
 
         // Scoped threads let the batch borrow the immutable registry instead of
         // forcing the whole engine/provider stack into 'static shared ownership.
@@ -201,8 +228,6 @@ where
 }
 
 fn execute_one_tool(registry: &ToolRegistry, tool_call: &ToolCall) -> ToolResult {
-    println!("[action] {} {}", tool_call.name, tool_call.arguments);
-
     // Act and observe: the engine only dispatches the call. Tool-specific
     // argument parsing and execution stay inside the tool layer.
     registry.execute(tool_call)
@@ -228,6 +253,7 @@ impl Default for RunOptions {
 #[derive(Debug)]
 pub enum EngineError {
     Provider(ProviderError),
+    Reporter(ReporterError),
     TurnLimitExceeded { max_turns: usize },
 }
 
@@ -235,6 +261,7 @@ impl fmt::Display for EngineError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Provider(error) => write!(formatter, "provider failed: {error}"),
+            Self::Reporter(error) => write!(formatter, "reporter failed: {error}"),
             Self::TurnLimitExceeded { max_turns } => {
                 write!(formatter, "agent loop exceeded {max_turns} turn(s)")
             }
@@ -247,5 +274,11 @@ impl std::error::Error for EngineError {}
 impl From<ProviderError> for EngineError {
     fn from(error: ProviderError) -> Self {
         Self::Provider(error)
+    }
+}
+
+impl From<ReporterError> for EngineError {
+    fn from(error: ReporterError) -> Self {
+        Self::Reporter(error)
     }
 }

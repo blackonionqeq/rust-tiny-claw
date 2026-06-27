@@ -18,18 +18,18 @@ For a quick type check from Windows PowerShell, `cargo check` is usually enough.
 
 Runtime configuration is loaded from the environment and `.env`. If
 `TINY_CLAW_PROVIDER` is unset, the code defaults to `mock`; if `.env` sets a
-real provider, plain `cargo run` will use that provider.
+real provider, `cargo run --bin tiny-claw` will use that provider.
 
 To force the deterministic mock smoke run without an API key:
 
 ```powershell
-wsl -d Ubuntu -- bash -lc "TINY_CLAW_PROVIDER=mock cargo run"
+wsl -d Ubuntu -- bash -lc "TINY_CLAW_PROVIDER=mock cargo run --bin tiny-claw"
 ```
 
 To run with the provider configured in `.env`:
 
 ```powershell
-wsl -d Ubuntu -- bash -lc "cargo run"
+wsl -d Ubuntu -- bash -lc "cargo run --bin tiny-claw"
 ```
 
 The mock smoke run creates an indented file, edits it with `edit_file`, verifies
@@ -73,6 +73,21 @@ system `grep` when `rg` is missing, and reports a clear observation if neither
 command is available. The fallback may not follow ripgrep's ignore rules.
 `bash` follows the course's local YOLO execution model, but still binds
 execution to the workspace and enforces resource limits.
+
+## Feishu Integration
+
+Feishu mode is compiled only when the `feishu` feature is enabled. Start from
+`.env.feishu.example`, keep Feishu credentials in `.env.feishu`, and run the
+callback server explicitly:
+
+```powershell
+wsl -d Ubuntu -- bash -lc "cargo run --features feishu --bin tiny-claw-feishu"
+```
+
+The first callback endpoint is `POST /feishu/events`. It supports Feishu URL
+verification, text message receive events, tenant access token caching, and
+plain text replies to the originating chat. Encrypted callbacks, cards,
+approvals, deduplication, and task scheduling are still later integration work.
 
 ## Provider Configuration
 

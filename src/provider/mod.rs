@@ -220,7 +220,7 @@ impl Provider for MockProvider {
                     ToolCall::new(
                         "call_005_c",
                         "read_file",
-                        json!({ "path": "src/main.rs", "start_line": 1, "line_count": 80 }),
+                        json!({ "path": "src/bin/tiny-claw.rs", "start_line": 1, "line_count": 80 }),
                     ),
                     ToolCall::new(
                         "call_005_d",

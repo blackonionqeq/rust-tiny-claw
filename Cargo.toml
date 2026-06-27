@@ -3,8 +3,23 @@ name = "rust-tiny-claw"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+feishu = ["dep:axum", "dep:tokio"]
+
 [dependencies]
+axum = { version = "0.8", optional = true }
 dotenvy = "0.15"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"], optional = true }
+
+[[bin]]
+name = "tiny-claw"
+path = "src/bin/tiny-claw.rs"
+
+[[bin]]
+name = "tiny-claw-feishu"
+path = "src/bin/tiny-claw-feishu.rs"
+required-features = ["feishu"]
