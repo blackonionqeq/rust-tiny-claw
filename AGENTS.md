@@ -25,6 +25,9 @@ The desired architecture is a small, explicit Harness runtime:
 - Keep placeholders small and compileable.
 - Avoid implementing Feishu, compaction, subagents, tracing, or benchmarks before
   their matching lessons unless explicitly requested.
+- Keep gateway-specific usage docs under `docs/usage/`, such as
+  `docs/usage/feishu.md`, and link them from `README.md` instead of expanding
+  the README with deployment details.
 
 ## Running And Verification
 
