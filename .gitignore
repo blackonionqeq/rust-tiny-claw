@@ -3,6 +3,7 @@ geektime-1274-offline.tar.gz
 .env
 .env.feishu
 .tiny-claw/
+deploy/nginx/tiny-claw-feishu.conf
 
 
 # Added by cargo

@@ -89,6 +89,17 @@ verification, text message receive events, tenant access token caching, and
 plain text replies to the originating chat. Encrypted callbacks, cards,
 approvals, deduplication, and task scheduling are still later integration work.
 
+For a Linux server with nginx in front of the Rust process, set
+`FEISHU_PUBLIC_HOST` in `.env.feishu` and render the nginx config:
+
+```bash
+sh scripts/render-feishu-nginx.sh
+```
+
+The rendered file is `deploy/nginx/tiny-claw-feishu.conf`. Review it, then copy
+or symlink it into your nginx sites directory and reload nginx. The Feishu event
+subscription URL should be `https://<FEISHU_PUBLIC_HOST>/feishu/events`.
+
 ## Provider Configuration
 
 Runtime configuration is read from environment variables and `.env` via
