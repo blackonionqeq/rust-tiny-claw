@@ -2,6 +2,7 @@ use crate::integrations::feishu::token::{TenantTokenCache, TokenError};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tracing::{debug, warn};
 
 const SEND_MESSAGE_URL: &str = "https://open.feishu.cn/open-apis/im/v1/messages";
 
@@ -20,6 +21,7 @@ impl FeishuClient {
     }
 
     pub fn send_text_to_chat(&self, chat_id: &str, text: &str) -> Result<(), ClientError> {
+        let text_len = text.chars().count();
         let token = self.token_cache.tenant_access_token()?;
         let content = serde_json::to_string(&TextContent { text }).map_err(|error| {
             ClientError::new(format!("failed to encode Feishu message content: {error}"))
@@ -46,6 +48,12 @@ impl FeishuClient {
         })?;
 
         if !status.is_success() {
+            warn!(
+                %chat_id,
+                text_len,
+                %status,
+                "Feishu send message HTTP request failed"
+            );
             return Err(ClientError::new(format!(
                 "Feishu send message endpoint returned HTTP {status}: {body}"
             )));
@@ -58,12 +66,20 @@ impl FeishuClient {
         })?;
 
         if response.code != 0 {
+            warn!(
+                %chat_id,
+                text_len,
+                code = response.code,
+                msg = %response.msg,
+                "Feishu send message API returned an error"
+            );
             return Err(ClientError::new(format!(
                 "Feishu send message returned code {}: {}",
                 response.code, response.msg
             )));
         }
 
+        debug!(%chat_id, text_len, "Feishu text message sent");
         Ok(())
     }
 }

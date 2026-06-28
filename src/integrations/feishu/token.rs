@@ -2,6 +2,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use tracing::{debug, warn};
 
 const TENANT_TOKEN_URL: &str =
     "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal";
@@ -33,11 +34,13 @@ impl TenantTokenCache {
                 .map_err(|_| TokenError::new("token cache poisoned"))?;
             if let Some(cached) = cached.as_ref() {
                 if cached.expires_at > Instant::now() {
+                    debug!("Feishu tenant access token cache hit");
                     return Ok(cached.token.clone());
                 }
             }
         }
 
+        debug!("Feishu tenant access token cache miss");
         let token = self.fetch_tenant_access_token()?;
         let mut cached = self
             .cached
@@ -64,6 +67,7 @@ impl TenantTokenCache {
         })?;
 
         if !status.is_success() {
+            warn!(%status, "Feishu token endpoint returned HTTP error");
             return Err(TokenError::new(format!(
                 "Feishu token endpoint returned HTTP {status}: {body}"
             )));
@@ -76,6 +80,11 @@ impl TenantTokenCache {
         })?;
 
         if response.code != 0 {
+            warn!(
+                code = response.code,
+                msg = %response.msg,
+                "Feishu token endpoint returned API error"
+            );
             return Err(TokenError::new(format!(
                 "Feishu token endpoint returned code {}: {}",
                 response.code, response.msg
@@ -85,6 +94,10 @@ impl TenantTokenCache {
         let ttl = Duration::from_secs(response.expire.max(1));
         let expires_at = Instant::now() + ttl.saturating_sub(EXPIRY_SAFETY_MARGIN);
 
+        debug!(
+            ttl_secs = response.expire,
+            "Feishu tenant access token refreshed"
+        );
         Ok(CachedToken {
             token: response.tenant_access_token,
             expires_at,

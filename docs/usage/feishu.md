@@ -102,6 +102,40 @@ Run it from the repository root so it can read `.env` and `.env.feishu`:
 ./target/release/tiny-claw-feishu
 ```
 
+## Logging
+
+The Feishu binary writes structured application logs to stdout/stderr through
+`tracing`. The default filter is:
+
+```text
+tiny_claw_feishu=info,rust_tiny_claw=info,tower_http=info
+```
+
+That records startup configuration summaries, HTTP request/response status,
+callback parsing outcomes, agent run start/end/failure, and Feishu OpenAPI
+errors. Secrets, access tokens, API keys, and full message bodies are not logged.
+
+For normal server runs, set `RUST_LOG` explicitly:
+
+```bash
+RUST_LOG=tiny_claw_feishu=info,rust_tiny_claw=info,tower_http=info \
+  ./target/release/tiny-claw-feishu
+```
+
+For short debugging sessions, enable more detail:
+
+```bash
+RUST_LOG=tiny_claw_feishu=debug,rust_tiny_claw=debug,tower_http=debug \
+  ./target/release/tiny-claw-feishu
+```
+
+If the process is managed by systemd, stdout/stderr logs are available through
+journald:
+
+```bash
+journalctl -u tiny-claw-feishu -f
+```
+
 ## nginx
 
 Render the nginx config from `.env.feishu`:
