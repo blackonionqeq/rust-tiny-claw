@@ -26,15 +26,31 @@ To force the deterministic mock smoke run without an API key:
 wsl -d Ubuntu -- bash -lc "TINY_CLAW_PROVIDER=mock cargo run --bin tiny-claw"
 ```
 
-To run with the provider configured in `.env`:
+To run a real prompt with the provider configured in `.env`, pass the prompt
+after `--`:
 
 ```powershell
-wsl -d Ubuntu -- bash -lc "cargo run --bin tiny-claw"
+wsl -d Ubuntu -- bash -lc "cargo run --bin tiny-claw -- 'Read AGENTS.md and summarize the project rules.'"
 ```
 
-The mock smoke run creates an indented file, edits it with `edit_file`, verifies
-the result, then requests multiple independent `read_file` and `grep` calls in
-one turn to exercise parallel read-only tool dispatch.
+You can also pipe stdin:
+
+```powershell
+wsl -d Ubuntu -- bash -lc "printf 'List the registered tools.\n' | cargo run --bin tiny-claw"
+```
+
+When no CLI prompt or stdin is provided, the binary falls back to the
+deterministic mock smoke prompt. That smoke run creates an indented file, edits
+it with `edit_file`, verifies the result, then requests multiple independent
+`read_file` and `grep` calls in one turn to exercise parallel read-only tool
+dispatch.
+
+To test explicitly enabled skills, create Codex-style skill files such as
+`.tiny-claw/skills/rust/SKILL.md` and set `TINY_CLAW_SKILLS`:
+
+```powershell
+wsl -d Ubuntu -- bash -lc "TINY_CLAW_SKILLS=rust cargo run --bin tiny-claw -- 'Use the active skill and inspect this repository.'"
+```
 
 ## Tool Dispatch
 
