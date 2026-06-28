@@ -1,6 +1,6 @@
 use super::AgentEngine;
 use crate::context_engine::ContextManager;
-use crate::memory::FileMemory;
+use crate::memory::{FileMemory, Session};
 use crate::provider::{Provider, ProviderError};
 use crate::schema::{Message, Role, ToolCall, ToolDefinition, ToolResult};
 use crate::telemetry::Telemetry;
@@ -47,6 +47,31 @@ impl Provider for CapturingProvider {
         _available_tools: Option<&[ToolDefinition]>,
     ) -> Result<Message, ProviderError> {
         *self.seen_messages.lock().unwrap() = Some(messages.to_vec());
+        Ok(Message::assistant("done"))
+    }
+}
+
+struct RecordingProvider {
+    calls: Arc<Mutex<Vec<Vec<Message>>>>,
+}
+
+impl RecordingProvider {
+    fn new(calls: Arc<Mutex<Vec<Vec<Message>>>>) -> Self {
+        Self { calls }
+    }
+}
+
+impl Provider for RecordingProvider {
+    fn name(&self) -> &'static str {
+        "recording"
+    }
+
+    fn generate(
+        &mut self,
+        messages: &[Message],
+        _available_tools: Option<&[ToolDefinition]>,
+    ) -> Result<Message, ProviderError> {
+        self.calls.lock().unwrap().push(messages.to_vec());
         Ok(Message::assistant("done"))
     }
 }
@@ -253,6 +278,7 @@ fn run_uses_context_manager_system_prompt() {
                 max_turns: 1,
                 enable_thinking: false,
                 stream: false,
+                working_memory_messages: 12,
             },
         )
         .unwrap();
@@ -269,6 +295,122 @@ fn run_uses_context_manager_system_prompt() {
     assert!(messages[0].content.contains("# Available Skills"));
     assert!(messages[0].content.contains("id: rust"));
     assert!(!messages[0].content.contains("Prefer cargo."));
+}
+
+#[test]
+fn run_session_sends_bounded_working_memory_to_provider() {
+    let work_dir = unique_temp_dir();
+    fs::create_dir_all(&work_dir).unwrap();
+
+    let seen_messages = Arc::new(Mutex::new(None));
+    let mut engine = AgentEngine::new(
+        CapturingProvider::new(Arc::clone(&seen_messages)),
+        ToolRegistry::new(),
+        ContextManager::new(&work_dir, Vec::new()),
+        FileMemory::new(&work_dir),
+        Telemetry::default(),
+    );
+    let session = Session::new("chat_1", &work_dir);
+    session.append_many([
+        Message::user("old user message"),
+        Message::assistant("recent assistant message"),
+    ]);
+
+    engine
+        .run_session_with_reporter(
+            &session,
+            "current user message",
+            super::RunOptions {
+                max_turns: 1,
+                enable_thinking: false,
+                stream: false,
+                working_memory_messages: 2,
+            },
+            &mut crate::reporter::terminal::TerminalReporter,
+        )
+        .unwrap();
+
+    fs::remove_dir_all(&work_dir).unwrap();
+
+    let messages = seen_messages.lock().unwrap().clone().unwrap();
+    assert_eq!(messages.len(), 3);
+    assert_eq!(messages[0].role, Role::System);
+    assert_eq!(messages[1].content, "recent assistant message");
+    assert_eq!(messages[2].content, "current user message");
+}
+
+#[test]
+fn run_session_keeps_provider_context_isolated_by_session() {
+    let work_dir = unique_temp_dir();
+    fs::create_dir_all(&work_dir).unwrap();
+
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let mut engine = AgentEngine::new(
+        RecordingProvider::new(Arc::clone(&calls)),
+        ToolRegistry::new(),
+        ContextManager::new(&work_dir, Vec::new()),
+        FileMemory::new(&work_dir),
+        Telemetry::default(),
+    );
+    let front = Session::new("front", &work_dir);
+    let back = Session::new("back", &work_dir);
+    let options = super::RunOptions {
+        max_turns: 1,
+        enable_thinking: false,
+        stream: false,
+        working_memory_messages: 12,
+    };
+
+    engine
+        .run_session_with_reporter(
+            &front,
+            "front first request",
+            options,
+            &mut crate::reporter::terminal::TerminalReporter,
+        )
+        .unwrap();
+    engine
+        .run_session_with_reporter(
+            &back,
+            "back only request",
+            options,
+            &mut crate::reporter::terminal::TerminalReporter,
+        )
+        .unwrap();
+    engine
+        .run_session_with_reporter(
+            &front,
+            "front second request",
+            options,
+            &mut crate::reporter::terminal::TerminalReporter,
+        )
+        .unwrap();
+
+    fs::remove_dir_all(&work_dir).unwrap();
+
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 3);
+    assert_context_contains(&calls[0], "front first request");
+    assert_context_excludes(&calls[0], "back only request");
+    assert_context_contains(&calls[1], "back only request");
+    assert_context_excludes(&calls[1], "front first request");
+    assert_context_contains(&calls[2], "front first request");
+    assert_context_contains(&calls[2], "front second request");
+    assert_context_excludes(&calls[2], "back only request");
+}
+
+fn assert_context_contains(messages: &[Message], content: &str) {
+    assert!(
+        messages.iter().any(|message| message.content == content),
+        "expected provider context to contain {content:?}, got {messages:?}"
+    );
+}
+
+fn assert_context_excludes(messages: &[Message], content: &str) {
+    assert!(
+        messages.iter().all(|message| message.content != content),
+        "expected provider context to exclude {content:?}, got {messages:?}"
+    );
 }
 
 fn unique_temp_dir() -> std::path::PathBuf {

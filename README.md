@@ -3,8 +3,9 @@
 Rust learning project for building an Agent Harness lesson by lesson.
 
 Current chapter state: the harness can run a two-stage ReAct loop, call local
-workspace tools, and execute same-turn tool batches in parallel. It supports the
-built-in mock provider plus OpenAI/Claude-compatible HTTP providers.
+workspace tools, execute same-turn tool batches in parallel, and keep bounded
+per-session working memory. It supports the built-in mock provider plus
+OpenAI/Claude-compatible HTTP providers.
 
 ## Run
 
@@ -124,9 +125,10 @@ wsl -d Ubuntu -- bash -lc "cargo run --features feishu --bin tiny-claw-feishu"
 The first callback endpoint is `POST /feishu/events`. It supports Feishu URL
 verification, text message receive events, tenant access token caching, and
 plain text replies to the originating chat. It also applies in-process message
-deduplication and replies with an unsupported-message notice for non-text
-messages. Encrypted callbacks, cards, approvals, persistent deduplication, and
-task scheduling are still later integration work.
+deduplication, keeps in-process per-chat sessions, and replies with an
+unsupported-message notice for non-text messages. Encrypted callbacks, cards,
+approvals, persistent deduplication, persistent sessions, and task scheduling
+are still later integration work.
 
 For Linux server deployment, nginx reverse proxy setup, and release binary
 usage, see `docs/usage/feishu.md`.

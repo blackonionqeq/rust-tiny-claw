@@ -1,5 +1,6 @@
 use rust_tiny_claw::app::{build_engine, stream_enabled};
 use rust_tiny_claw::engine::RunOptions;
+use rust_tiny_claw::memory::SessionManager;
 use std::env;
 use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
@@ -12,13 +13,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("rust-tiny-claw engine boot sequence");
 
     let cli_input = cli_input_from_process()?;
-    let work_dir = cli_input.work_dir;
+    let work_dir = cli_input.work_dir.canonicalize()?;
     let mut engine = build_engine(&work_dir)?;
+    let sessions = SessionManager::new();
+    let session = sessions.get_or_create(format!("cli:{}", work_dir.display()), work_dir.clone());
 
     let options = RunOptions {
         max_turns: 12,
         enable_thinking: false,
         stream: stream_enabled()?,
+        working_memory_messages: 12,
     };
 
     for line in engine.boot_plan(options) {
@@ -26,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("starting two-stage ReAct loop");
-    engine.run_with_options(cli_input.prompt, options)?;
+    engine.run_session(&session, cli_input.prompt, options)?;
 
     Ok(())
 }

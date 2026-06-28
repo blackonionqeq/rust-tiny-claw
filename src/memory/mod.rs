@@ -1,16 +1,10 @@
-use std::path::{Path, PathBuf};
+mod file;
+mod manager;
+mod session;
 
-#[derive(Debug)]
-pub struct FileMemory {
-    root: PathBuf,
-}
+#[cfg(test)]
+mod tests;
 
-impl FileMemory {
-    pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
-    }
-
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-}
+pub use file::FileMemory;
+pub use manager::SessionManager;
+pub use session::Session;

@@ -4,6 +4,7 @@ use crate::integrations::feishu::client::FeishuClient;
 use crate::integrations::feishu::config::FeishuConfig;
 use crate::integrations::feishu::event::{FeishuCallback, parse_callback};
 use crate::integrations::feishu::reporter::FeishuReporter;
+use crate::memory::SessionManager;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::post;
@@ -28,6 +29,7 @@ pub struct FeishuServerState {
     client: FeishuClient,
     work_dir: PathBuf,
     deduper: Arc<MessageDeduper>,
+    sessions: Arc<SessionManager>,
 }
 
 impl FeishuServerState {
@@ -37,6 +39,7 @@ impl FeishuServerState {
             client,
             work_dir,
             deduper: Arc::new(MessageDeduper::new(MESSAGE_DEDUP_TTL)),
+            sessions: Arc::new(SessionManager::new()),
         }
     }
 
@@ -101,6 +104,7 @@ async fn handle_event(
 
             let client = state.client.clone();
             let work_dir = state.work_dir.clone();
+            let sessions = Arc::clone(&state.sessions);
             tokio::task::spawn_blocking(move || {
                 let started = Instant::now();
                 info!(%message_id, %chat_id, "Feishu agent run started");
@@ -109,12 +113,20 @@ async fn handle_event(
                     || -> Result<(), Box<dyn std::error::Error>> {
                         let mut engine = build_engine(&work_dir)?;
                         let mut reporter = FeishuReporter::new(client, message.chat_id);
+                        let session =
+                            sessions.get_or_create(format!("feishu:{chat_id}"), work_dir.clone());
                         let options = RunOptions {
                             max_turns: 12,
                             enable_thinking: false,
                             stream: false,
+                            working_memory_messages: 12,
                         };
-                        engine.run_with_reporter(message.text, options, &mut reporter)?;
+                        engine.run_session_with_reporter(
+                            &session,
+                            message.text,
+                            options,
+                            &mut reporter,
+                        )?;
                         Ok(())
                     },
                 ));

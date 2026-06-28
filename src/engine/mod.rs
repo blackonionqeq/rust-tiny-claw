@@ -1,5 +1,5 @@
 use crate::context_engine::{ContextError, ContextManager};
-use crate::memory::FileMemory;
+use crate::memory::{FileMemory, Session};
 use crate::provider::{Provider, ProviderError, StdoutStreamSink};
 use crate::reporter::terminal::TerminalReporter;
 use crate::reporter::{Reporter, ReporterError};
@@ -76,15 +76,39 @@ where
         options: RunOptions,
         reporter: &mut dyn Reporter,
     ) -> Result<Vec<Message>, EngineError> {
-        // The message list is the agent's short-term memory for this lesson.
-        // Prompt sources are assembled by ContextManager before the first model call.
-        let mut messages = vec![
-            Message::system(self.context.build_system_prompt()?),
-            Message::user(user_prompt),
-        ];
+        let session = Session::new("one-shot", self.context.work_dir().clone());
+        self.run_session_with_reporter(&session, user_prompt, options, reporter)
+    }
+
+    pub fn run_session(
+        &mut self,
+        session: &Session,
+        user_prompt: impl Into<String>,
+        options: RunOptions,
+    ) -> Result<Vec<Message>, EngineError> {
+        let mut reporter = TerminalReporter;
+        self.run_session_with_reporter(session, user_prompt, options, &mut reporter)
+    }
+
+    pub fn run_session_with_reporter(
+        &mut self,
+        session: &Session,
+        user_prompt: impl Into<String>,
+        options: RunOptions,
+        reporter: &mut dyn Reporter,
+    ) -> Result<Vec<Message>, EngineError> {
+        // Hold the per-session run lock for the whole ReAct loop so concurrent
+        // requests from the same chat cannot reorder history or tool results.
+        let _run_guard = session.lock_run();
+        session.append(Message::user(user_prompt));
 
         for turn in 1..=options.max_turns {
             reporter.on_turn_start(turn)?;
+
+            // The session owns long-term history. Each provider call receives only
+            // the current system prompt plus a bounded working-memory window.
+            let mut messages = vec![Message::system(self.context.build_system_prompt()?)];
+            messages.extend(session.working_memory(options.working_memory_messages));
 
             let available_tools = self.registry.definitions();
             if options.enable_thinking {
@@ -108,6 +132,7 @@ where
                 }
 
                 if !thinking.content.is_empty() {
+                    session.append(thinking.clone());
                     messages.push(thinking);
                 }
             }
@@ -133,11 +158,12 @@ where
             // Keep the provider's response before appending tool observations so the
             // context preserves the exact ReAct order: assistant action, then result.
             let tool_calls = response.tool_calls.clone();
+            session.append(response.clone());
             messages.push(response);
 
             if tool_calls.is_empty() {
                 reporter.on_complete()?;
-                return Ok(messages);
+                return Ok(self.session_transcript(session)?);
             }
 
             reporter.on_tool_calls(&tool_calls)?;
@@ -146,7 +172,7 @@ where
             for result in results {
                 reporter.on_tool_result(&result)?;
 
-                messages.push(Message::observation(result.tool_call_id, result.output));
+                session.append(Message::observation(result.tool_call_id, result.output));
             }
         }
 
@@ -224,6 +250,12 @@ where
             .iter()
             .all(|tool_call| self.registry.is_read_only_call(tool_call))
     }
+
+    fn session_transcript(&self, session: &Session) -> Result<Vec<Message>, EngineError> {
+        let mut transcript = vec![Message::system(self.context.build_system_prompt()?)];
+        transcript.extend(session.history());
+        Ok(transcript)
+    }
 }
 
 fn execute_one_tool(registry: &ToolRegistry, tool_call: &ToolCall) -> ToolResult {
@@ -237,6 +269,7 @@ pub struct RunOptions {
     pub max_turns: usize,
     pub enable_thinking: bool,
     pub stream: bool,
+    pub working_memory_messages: usize,
 }
 
 impl Default for RunOptions {
@@ -245,6 +278,7 @@ impl Default for RunOptions {
             max_turns: 16,
             enable_thinking: false,
             stream: true,
+            working_memory_messages: 12,
         }
     }
 }
