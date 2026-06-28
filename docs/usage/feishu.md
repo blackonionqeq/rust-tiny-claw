@@ -196,6 +196,8 @@ The current gateway supports:
 
 - URL verification challenge.
 - Plain text message receive events.
+- Unsupported-message replies for non-text messages.
+- In-process message deduplication by Feishu message id.
 - Tenant access token retrieval and caching.
 - Plain text replies to the originating chat.
 
@@ -204,6 +206,6 @@ It does not yet support:
 - Encrypted callback bodies.
 - WebSocket or long-connection event mode.
 - Rich cards or approval cards.
-- Event deduplication.
+- Persistent event deduplication across process restarts.
 - Workspace-level task queue or locking.
 - Persistent per-chat sessions.

@@ -10,9 +10,18 @@ pub struct IncomingMessage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnsupportedMessage {
+    pub chat_id: String,
+    pub message_id: String,
+    pub sender_id: String,
+    pub message_type: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FeishuCallback {
     Challenge { challenge: String },
     Message(IncomingMessage),
+    UnsupportedMessage(UnsupportedMessage),
     Ignored,
 }
 
@@ -41,7 +50,7 @@ pub fn parse_callback(
         return Ok(FeishuCallback::Ignored);
     }
 
-    Ok(FeishuCallback::Message(parse_message(body)?))
+    parse_message(body)
 }
 
 fn verify_callback_token(body: &Value, verify_token: Option<&str>) -> Result<(), EventError> {
@@ -61,7 +70,7 @@ fn verify_callback_token(body: &Value, verify_token: Option<&str>) -> Result<(),
     }
 }
 
-fn parse_message(body: &Value) -> Result<IncomingMessage, EventError> {
+fn parse_message(body: &Value) -> Result<FeishuCallback, EventError> {
     let event = body
         .get("event")
         .ok_or_else(|| EventError::new("missing Feishu event object"))?;
@@ -81,21 +90,24 @@ fn parse_message(body: &Value) -> Result<IncomingMessage, EventError> {
     let message_type = string_at(message, "/message_type")?;
 
     if message_type != "text" {
-        return Err(EventError::new(format!(
-            "unsupported Feishu message type: {message_type}"
-        )));
+        return Ok(FeishuCallback::UnsupportedMessage(UnsupportedMessage {
+            chat_id,
+            message_id,
+            sender_id,
+            message_type,
+        }));
     }
 
     let content = string_at(message, "/content")?;
     let content: TextContent = serde_json::from_str(&content)
         .map_err(|error| EventError::new(format!("invalid Feishu text content: {error}")))?;
 
-    Ok(IncomingMessage {
+    Ok(FeishuCallback::Message(IncomingMessage {
         chat_id,
         message_id,
         sender_id,
         text: content.text,
-    })
+    }))
 }
 
 fn string_at(value: &Value, pointer: &str) -> Result<String, EventError> {
@@ -184,5 +196,36 @@ mod tests {
         assert_eq!(incoming.message_id, "om_1");
         assert_eq!(incoming.sender_id, "ou_1");
         assert_eq!(incoming.text, "run tests");
+    }
+
+    #[test]
+    fn normalizes_unsupported_message_event() {
+        let body = json!({
+            "header": {
+                "event_type": "im.message.receive_v1",
+                "token": "verify"
+            },
+            "event": {
+                "sender": {
+                    "sender_id": { "open_id": "ou_1" }
+                },
+                "message": {
+                    "message_id": "om_1",
+                    "chat_id": "oc_1",
+                    "message_type": "image",
+                    "content": "{}"
+                }
+            }
+        });
+
+        let unsupported = match parse_callback(&body, Some("verify")).unwrap() {
+            FeishuCallback::UnsupportedMessage(unsupported) => unsupported,
+            other => panic!("unexpected callback: {other:?}"),
+        };
+
+        assert_eq!(unsupported.chat_id, "oc_1");
+        assert_eq!(unsupported.message_id, "om_1");
+        assert_eq!(unsupported.sender_id, "ou_1");
+        assert_eq!(unsupported.message_type, "image");
     }
 }

@@ -10,18 +10,24 @@ use axum::routing::post;
 use axum::{Json, Router};
 use serde::Serialize;
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Instant;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer};
 use tracing::{Level, error, info, warn};
+
+const MESSAGE_DEDUP_TTL: Duration = Duration::from_secs(10 * 60);
+const UNSUPPORTED_MESSAGE_REPLY: &str =
+    "当前只支持文本消息。请直接发送文字指令，我会按文字内容执行。";
 
 #[derive(Clone)]
 pub struct FeishuServerState {
     config: FeishuConfig,
     client: FeishuClient,
     work_dir: PathBuf,
+    deduper: Arc<MessageDeduper>,
 }
 
 impl FeishuServerState {
@@ -30,7 +36,12 @@ impl FeishuServerState {
             config,
             client,
             work_dir,
+            deduper: Arc::new(MessageDeduper::new(MESSAGE_DEDUP_TTL)),
         }
+    }
+
+    fn already_seen_message(&self, message_id: &str) -> bool {
+        self.deduper.already_seen_or_insert(message_id)
     }
 }
 
@@ -83,6 +94,11 @@ async fn handle_event(
                 "Feishu message received"
             );
 
+            if state.already_seen_message(&message_id) {
+                info!(%message_id, %chat_id, "duplicate Feishu message ignored");
+                return Ok(Json(json!({ "ok": true, "duplicate": true })));
+            }
+
             let client = state.client.clone();
             let work_dir = state.work_dir.clone();
             tokio::task::spawn_blocking(move || {
@@ -130,6 +146,38 @@ async fn handle_event(
 
             Ok(Json(json!({ "ok": true })))
         }
+        Ok(FeishuCallback::UnsupportedMessage(message)) => {
+            let message_id = message.message_id.clone();
+            let chat_id = message.chat_id.clone();
+            let sender_id = message.sender_id.clone();
+            let message_type = message.message_type.clone();
+            info!(
+                %message_id,
+                %chat_id,
+                %sender_id,
+                %message_type,
+                "unsupported Feishu message received"
+            );
+
+            if state.already_seen_message(&message_id) {
+                info!(%message_id, %chat_id, "duplicate unsupported Feishu message ignored");
+                return Ok(Json(json!({ "ok": true, "duplicate": true })));
+            }
+
+            let client = state.client.clone();
+            tokio::task::spawn_blocking(move || {
+                if let Err(error) = client.send_text_to_chat(&chat_id, UNSUPPORTED_MESSAGE_REPLY) {
+                    error!(
+                        %message_id,
+                        %chat_id,
+                        error = %error,
+                        "failed to send unsupported Feishu message reply"
+                    );
+                }
+            });
+
+            Ok(Json(json!({ "ok": true })))
+        }
         Err(error) => {
             warn!(error = %error, "Feishu callback rejected");
             Err((
@@ -145,6 +193,38 @@ async fn handle_event(
 #[derive(Debug, Serialize)]
 struct ErrorResponse {
     error: String,
+}
+
+#[derive(Debug)]
+struct MessageDeduper {
+    ttl: Duration,
+    seen_at: Mutex<HashMap<String, Instant>>,
+}
+
+impl MessageDeduper {
+    fn new(ttl: Duration) -> Self {
+        Self {
+            ttl,
+            seen_at: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn already_seen_or_insert(&self, message_id: &str) -> bool {
+        let now = Instant::now();
+        let mut seen_at = self
+            .seen_at
+            .lock()
+            .expect("Feishu message dedup cache poisoned");
+
+        seen_at.retain(|_, first_seen_at| now.duration_since(*first_seen_at) < self.ttl);
+
+        if seen_at.contains_key(message_id) {
+            true
+        } else {
+            seen_at.insert(message_id.to_string(), now);
+            false
+        }
+    }
 }
 
 #[cfg(test)]
@@ -169,5 +249,14 @@ mod tests {
         let state = FeishuServerState::new(config, client, PathBuf::from("."));
 
         let _router = router(state);
+    }
+
+    #[test]
+    fn deduper_detects_duplicate_message_ids() {
+        let deduper = MessageDeduper::new(Duration::from_secs(60));
+
+        assert!(!deduper.already_seen_or_insert("om_1"));
+        assert!(deduper.already_seen_or_insert("om_1"));
+        assert!(!deduper.already_seen_or_insert("om_2"));
     }
 }

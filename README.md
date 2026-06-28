@@ -86,8 +86,10 @@ wsl -d Ubuntu -- bash -lc "cargo run --features feishu --bin tiny-claw-feishu"
 
 The first callback endpoint is `POST /feishu/events`. It supports Feishu URL
 verification, text message receive events, tenant access token caching, and
-plain text replies to the originating chat. Encrypted callbacks, cards,
-approvals, deduplication, and task scheduling are still later integration work.
+plain text replies to the originating chat. It also applies in-process message
+deduplication and replies with an unsupported-message notice for non-text
+messages. Encrypted callbacks, cards, approvals, persistent deduplication, and
+task scheduling are still later integration work.
 
 For Linux server deployment, nginx reverse proxy setup, and release binary
 usage, see `docs/usage/feishu.md`.
