@@ -5,6 +5,7 @@ geektime-1274-offline.tar.gz
 .tiny-claw/
 var/skill-probe-workspace/
 deploy/nginx/tiny-claw-feishu.conf
+tmp/
 
 
 # Added by cargo
