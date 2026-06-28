@@ -29,6 +29,16 @@ The desired architecture is a small, explicit Harness runtime:
   `docs/usage/feishu.md`, and link them from `README.md` instead of expanding
   the README with deployment details.
 
+## Git And Commit Style
+
+- Before committing, check recent history with `git log --oneline -10` and keep
+  the new commit message consistent with the existing style.
+- Use emoji-prefixed commit subjects when history uses them, especially:
+  - `📝` for documentation, notes, specs, and usage guide changes.
+  - `✨` for user-visible features or new runtime behavior.
+- Do not fall back to plain text commit subjects unless the surrounding history
+  has already moved to that style.
+
 ## Running And Verification
 
 Use WSL Ubuntu for commands that need to build or run the Rust binary.
