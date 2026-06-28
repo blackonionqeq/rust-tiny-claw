@@ -2,6 +2,7 @@ use rust_tiny_claw::app::{build_engine, stream_enabled};
 use rust_tiny_claw::engine::RunOptions;
 use std::env;
 use std::io::{self, IsTerminal, Read};
+use std::path::PathBuf;
 
 const SMOKE_PROMPT: &str = "Smoke-test the lesson 8 harness. Create .tiny-claw/smoke/edit-target.rs with an indented TODO auth block. Read it once. Then call edit_file exactly once to replace that block with a Forbidden return; in old_text, omit the original indentation so the fuzzy indentation fallback is exercised. Read the file once more to confirm the replacement. Do not repeat the edit flow after it succeeds. Finally, read Cargo.toml, README.md, and src/bin/tiny-claw.rs and call grep for TODO in one independent batch so the engine can execute multiple read-only tool calls in parallel.";
 
@@ -10,7 +11,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("rust-tiny-claw engine boot sequence");
 
-    let work_dir = env::current_dir()?;
+    let cli_input = cli_input_from_process()?;
+    let work_dir = cli_input.work_dir;
     let mut engine = build_engine(&work_dir)?;
 
     let options = RunOptions {
@@ -24,37 +26,71 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("starting two-stage ReAct loop");
-    engine.run_with_options(prompt_from_cli()?, options)?;
+    engine.run_with_options(cli_input.prompt, options)?;
 
     Ok(())
 }
 
-fn prompt_from_cli() -> Result<String, Box<dyn std::error::Error>> {
-    let args = env::args().skip(1).collect::<Vec<_>>();
-    let mut stdin = io::stdin();
-
-    if stdin.is_terminal() {
-        return Ok(prompt_from_inputs(args, None));
-    }
-
-    let mut input = String::new();
-    stdin.read_to_string(&mut input)?;
-    Ok(prompt_from_inputs(args, Some(input)))
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CliInput {
+    work_dir: PathBuf,
+    prompt: String,
 }
 
-fn prompt_from_inputs(args: Vec<String>, stdin: Option<String>) -> String {
-    if !args.is_empty() {
-        return args.join(" ");
+fn cli_input_from_process() -> Result<CliInput, Box<dyn std::error::Error>> {
+    let args = env::args().skip(1).collect::<Vec<_>>();
+    let mut stdin = io::stdin();
+    let stdin_prompt = if stdin.is_terminal() {
+        None
+    } else {
+        let mut input = String::new();
+        stdin.read_to_string(&mut input)?;
+        Some(input)
+    };
+    let default_work_dir = env::current_dir()?;
+
+    parse_cli_input(args, stdin_prompt, default_work_dir)
+        .map_err(|error| -> Box<dyn std::error::Error> { error.into() })
+}
+
+fn parse_cli_input(
+    args: Vec<String>,
+    stdin: Option<String>,
+    default_work_dir: PathBuf,
+) -> Result<CliInput, String> {
+    let mut work_dir = default_work_dir;
+    let mut prompt_parts = Vec::new();
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--workspace" | "-C" => {
+                index += 1;
+                let Some(path) = args.get(index) else {
+                    return Err(format!("{} requires a path", args[index - 1]));
+                };
+                work_dir = PathBuf::from(path);
+            }
+            arg => prompt_parts.push(arg.to_string()),
+        }
+
+        index += 1;
     }
 
-    if let Some(input) = stdin {
+    let prompt = if !prompt_parts.is_empty() {
+        prompt_parts.join(" ")
+    } else if let Some(input) = stdin {
         let trimmed = input.trim();
         if !trimmed.is_empty() {
-            return trimmed.to_string();
+            trimmed.to_string()
+        } else {
+            SMOKE_PROMPT.to_string()
         }
-    }
+    } else {
+        SMOKE_PROMPT.to_string()
+    };
 
-    SMOKE_PROMPT.to_string()
+    Ok(CliInput { work_dir, prompt })
 }
 
 #[cfg(test)]
@@ -63,22 +99,79 @@ mod tests {
 
     #[test]
     fn cli_args_become_prompt() {
-        let prompt = prompt_from_inputs(vec!["inspect".to_string(), "skills".to_string()], None);
+        let input = parse_cli_input(
+            vec!["inspect".to_string(), "skills".to_string()],
+            None,
+            PathBuf::from("/default"),
+        )
+        .unwrap();
 
-        assert_eq!(prompt, "inspect skills");
+        assert_eq!(input.work_dir, PathBuf::from("/default"));
+        assert_eq!(input.prompt, "inspect skills");
     }
 
     #[test]
     fn piped_stdin_becomes_prompt_without_args() {
-        let prompt = prompt_from_inputs(Vec::new(), Some("use rust skill\n".to_string()));
+        let input = parse_cli_input(
+            Vec::new(),
+            Some("use rust skill\n".to_string()),
+            PathBuf::from("/default"),
+        )
+        .unwrap();
 
-        assert_eq!(prompt, "use rust skill");
+        assert_eq!(input.prompt, "use rust skill");
     }
 
     #[test]
     fn no_input_falls_back_to_smoke_prompt() {
-        let prompt = prompt_from_inputs(Vec::new(), None);
+        let input = parse_cli_input(Vec::new(), None, PathBuf::from("/default")).unwrap();
 
-        assert_eq!(prompt, SMOKE_PROMPT);
+        assert_eq!(input.prompt, SMOKE_PROMPT);
+    }
+
+    #[test]
+    fn workspace_flag_sets_work_dir_without_becoming_prompt() {
+        let input = parse_cli_input(
+            vec![
+                "--workspace".to_string(),
+                "/tmp/project".to_string(),
+                "inspect".to_string(),
+            ],
+            None,
+            PathBuf::from("/default"),
+        )
+        .unwrap();
+
+        assert_eq!(input.work_dir, PathBuf::from("/tmp/project"));
+        assert_eq!(input.prompt, "inspect");
+    }
+
+    #[test]
+    fn short_workspace_flag_sets_work_dir() {
+        let input = parse_cli_input(
+            vec![
+                "-C".to_string(),
+                "/tmp/project".to_string(),
+                "inspect".to_string(),
+            ],
+            None,
+            PathBuf::from("/default"),
+        )
+        .unwrap();
+
+        assert_eq!(input.work_dir, PathBuf::from("/tmp/project"));
+        assert_eq!(input.prompt, "inspect");
+    }
+
+    #[test]
+    fn workspace_flag_requires_path() {
+        let error = parse_cli_input(
+            vec!["--workspace".to_string()],
+            None,
+            PathBuf::from("/default"),
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "--workspace requires a path");
     }
 }

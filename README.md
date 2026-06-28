@@ -33,6 +33,20 @@ after `--`:
 wsl -d Ubuntu -- bash -lc "cargo run --bin tiny-claw -- 'Read AGENTS.md and summarize the project rules.'"
 ```
 
+By default, the agent workspace is the current working directory. When running
+from this source repository but testing another project, pass the target
+workspace explicitly:
+
+```powershell
+wsl -d Ubuntu -- bash -lc "cargo run --bin tiny-claw -- --workspace /mnt/d/codes/other-project 'Read AGENTS.md and summarize the project rules.'"
+```
+
+The shorter `-C` form is also supported:
+
+```powershell
+wsl -d Ubuntu -- bash -lc "cargo run --bin tiny-claw -- -C /mnt/d/codes/other-project 'List the active project rules.'"
+```
+
 You can also pipe stdin:
 
 ```powershell
@@ -49,7 +63,7 @@ To test explicitly enabled skills, create Codex-style skill files such as
 `.tiny-claw/skills/rust/SKILL.md` and set `TINY_CLAW_SKILLS`:
 
 ```powershell
-wsl -d Ubuntu -- bash -lc "TINY_CLAW_SKILLS=rust cargo run --bin tiny-claw -- 'Use the active skill and inspect this repository.'"
+wsl -d Ubuntu -- bash -lc "TINY_CLAW_SKILLS=rust cargo run --bin tiny-claw -- -C /mnt/d/codes/other-project 'Use the active skill and inspect this repository.'"
 ```
 
 ## Tool Dispatch

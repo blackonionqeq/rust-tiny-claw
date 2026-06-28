@@ -46,6 +46,7 @@ where
             format!("thinking phase: {}", options.enable_thinking),
             format!("tools registered: {}", self.registry.len()),
             format!("context manager: {}", self.context.name()),
+            format!("workspace: {}", self.context.work_dir().display()),
             format!("memory root: {}", self.memory.root().display()),
             format!("telemetry: {}", self.telemetry.name()),
             "two-stage ReAct loop available".to_string(),

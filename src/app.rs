@@ -10,21 +10,22 @@ use std::path::Path;
 pub fn build_engine(
     work_dir: &Path,
 ) -> Result<AgentEngine<Box<dyn Provider>>, Box<dyn std::error::Error>> {
+    let work_dir = work_dir.canonicalize()?;
     let provider = build_provider()?;
     let active_skills = active_skills_from_env();
 
     let mut registry = ToolRegistry::new();
-    registry.register(ReadFileTool::new(work_dir)?)?;
-    registry.register(WriteFileTool::new(work_dir)?)?;
-    registry.register(BashTool::new(work_dir)?)?;
-    registry.register(EditFileTool::new(work_dir)?)?;
-    registry.register(GrepTool::new(work_dir)?)?;
+    registry.register(ReadFileTool::new(&work_dir)?)?;
+    registry.register(WriteFileTool::new(&work_dir)?)?;
+    registry.register(BashTool::new(&work_dir)?)?;
+    registry.register(EditFileTool::new(&work_dir)?)?;
+    registry.register(GrepTool::new(&work_dir)?)?;
 
     Ok(AgentEngine::new(
         provider,
         registry,
-        ContextManager::new(work_dir, active_skills),
-        FileMemory::new(".tiny-claw"),
+        ContextManager::new(&work_dir, active_skills),
+        FileMemory::new(work_dir.join(".tiny-claw")),
         Telemetry::default(),
     ))
 }

@@ -27,6 +27,10 @@ impl ContextManager {
         "context-manager"
     }
 
+    pub fn work_dir(&self) -> &PathBuf {
+        &self.work_dir
+    }
+
     pub fn build_system_prompt(&self) -> Result<String, ContextError> {
         let mut sections = vec![format!("# Base Instructions\n\n{BASE_INSTRUCTIONS}")];
 
