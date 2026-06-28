@@ -28,6 +28,14 @@
   limiting. Prompt input and workspace override are already available through
   positional CLI text, stdin, `--workspace`, and `-C`.
 
+## Context And Memory
+
+- Later: revisit working memory budgeting when token usage tracking lands.
+  The current session window is message-count based. Keep full session history
+  intact, but move provider request assembly toward a context-engine budget that
+  can combine max messages, estimated input tokens or characters, tool
+  call/observation pairing, and later real provider token telemetry.
+
 ## Integrations
 
 - Track Feishu gateway follow-ups in `docs/todo/feishu.md`.
