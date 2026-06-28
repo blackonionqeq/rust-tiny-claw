@@ -3,6 +3,7 @@ geektime-1274-offline.tar.gz
 .env
 .env.feishu
 .tiny-claw/
+var/skill-probe-workspace/
 deploy/nginx/tiny-claw-feishu.conf
 
 
