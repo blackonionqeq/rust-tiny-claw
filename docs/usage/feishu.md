@@ -198,7 +198,7 @@ The current gateway supports:
 - Plain text message receive events.
 - Unsupported-message replies for non-text messages.
 - In-process message deduplication by Feishu message id.
-- In-process per-chat sessions with bounded working memory.
+- In-process per-chat sessions with provider request context compaction.
 - Tenant access token retrieval and caching.
 - Plain text replies to the originating chat.
 

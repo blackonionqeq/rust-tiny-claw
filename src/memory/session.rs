@@ -9,8 +9,8 @@ pub struct Session {
     work_dir: PathBuf,
     created_at: SystemTime,
     updated_at: RwLock<SystemTime>,
-    // Full per-session transcript. Provider calls should use working_memory()
-    // instead of reading this directly, so long chats do not grow every request.
+    // Full per-session transcript. Provider calls should compact a temporary
+    // copy of this history instead of mutating or truncating the stored record.
     history: RwLock<Vec<Message>>,
     // A session is the ordering boundary for a conversation. Different sessions
     // may run concurrently, but two runs for the same session must not interleave
@@ -68,25 +68,6 @@ impl Session {
             .read()
             .expect("session history lock poisoned")
             .clone()
-    }
-
-    pub fn working_memory(&self, limit: usize) -> Vec<Message> {
-        let history = self.history.read().expect("session history lock poisoned");
-        if limit == 0 || history.len() <= limit {
-            return history.clone();
-        }
-
-        let mut memory = history[history.len() - limit..].to_vec();
-        // Tool observations are only valid when the matching assistant tool call
-        // is still in context. Drop leading observations created by the slice
-        // boundary to avoid sending orphaned tool results to provider APIs.
-        while memory
-            .first()
-            .is_some_and(|message| message.tool_call_id.is_some())
-        {
-            memory.remove(0);
-        }
-        memory
     }
 
     pub fn lock_run(&self) -> std::sync::MutexGuard<'_, ()> {

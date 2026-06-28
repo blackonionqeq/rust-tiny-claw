@@ -30,11 +30,24 @@
 
 ## Context And Memory
 
-- Later: revisit working memory budgeting when token usage tracking lands.
-  The current session window is message-count based. Keep full session history
-  intact, but move provider request assembly toward a context-engine budget that
-  can combine max messages, estimated input tokens or characters, tool
-  call/observation pairing, and later real provider token telemetry.
+- Later: add persistent session storage behind the current in-memory `Session`
+  and `SessionManager` APIs. Prefer a small `SessionStore` abstraction with a
+  file-backed JSONL implementation so `append_many` can durably append messages
+  and `get_or_create` can reload prior history by session id.
+- Later: revisit context budgeting when token usage tracking lands. The current
+  compactor is character-count based. Keep full session history intact, but
+  evolve provider request assembly toward real token telemetry and adaptive
+  watermarks.
+- Later: consider a more advanced context budgeter once sessions become long
+  enough to justify it:
+  - Use provider `prompt_tokens` usage to calibrate local estimates and reserve
+    output tokens before each request.
+  - Build context from newest to oldest under a soft budget instead of always
+    compacting the full history copy.
+  - Cache compacted forms for unchanged old messages so repeated turns do not
+    rescan or reallocate the same large observations.
+  - Add memory paging/search for old tool outputs so masked details can be
+    pulled back into context when the model explicitly needs them.
 
 ## Integrations
 

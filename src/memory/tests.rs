@@ -1,39 +1,6 @@
-use super::{Session, SessionManager};
+use super::SessionManager;
 use crate::schema::Message;
 use std::path::PathBuf;
-
-#[test]
-fn working_memory_returns_recent_messages() {
-    let session = Session::new("s1", ".");
-    session.append_many([
-        Message::user("one"),
-        Message::assistant("two"),
-        Message::user("three"),
-    ]);
-
-    let memory = session.working_memory(2);
-
-    assert_eq!(memory.len(), 2);
-    assert_eq!(memory[0].content, "two");
-    assert_eq!(memory[1].content, "three");
-}
-
-#[test]
-fn working_memory_drops_orphaned_observation_at_boundary() {
-    let session = Session::new("s1", ".");
-    session.append_many([
-        Message::assistant("tool call was before the window"),
-        Message::observation("call_1", "orphaned"),
-        Message::user("next prompt"),
-        Message::assistant("next answer"),
-    ]);
-
-    let memory = session.working_memory(3);
-
-    assert_eq!(memory.len(), 2);
-    assert_eq!(memory[0].content, "next prompt");
-    assert_eq!(memory[1].content, "next answer");
-}
 
 #[test]
 fn session_manager_reuses_existing_session() {

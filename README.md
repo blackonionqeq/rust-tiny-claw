@@ -4,7 +4,7 @@ Rust learning project for building an Agent Harness lesson by lesson.
 
 Current chapter state: the harness can run a two-stage ReAct loop, call local
 workspace tools, execute same-turn tool batches in parallel, and keep bounded
-per-session working memory. It supports the built-in mock provider plus
+provider request contexts over full per-session history. It supports the built-in mock provider plus
 OpenAI/Claude-compatible HTTP providers.
 
 ## Run

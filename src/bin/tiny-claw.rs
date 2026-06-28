@@ -1,4 +1,5 @@
 use rust_tiny_claw::app::{build_engine, stream_enabled};
+use rust_tiny_claw::context_engine::ContextBudget;
 use rust_tiny_claw::engine::RunOptions;
 use rust_tiny_claw::memory::SessionManager;
 use std::env;
@@ -22,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_turns: 12,
         enable_thinking: false,
         stream: stream_enabled()?,
-        working_memory_messages: 12,
+        context_budget: ContextBudget::default(),
     };
 
     for line in engine.boot_plan(options) {

@@ -1,5 +1,7 @@
+mod compaction;
 mod skills;
 
+pub use compaction::{ContextBudget, ContextCompactor};
 use skills::load_active_skill_manifests;
 use std::fmt;
 use std::fs;

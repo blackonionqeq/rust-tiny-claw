@@ -1,5 +1,5 @@
 use super::AgentEngine;
-use crate::context_engine::ContextManager;
+use crate::context_engine::{ContextBudget, ContextManager};
 use crate::memory::{FileMemory, Session};
 use crate::provider::{Provider, ProviderError};
 use crate::schema::{Message, Role, ToolCall, ToolDefinition, ToolResult};
@@ -278,7 +278,7 @@ fn run_uses_context_manager_system_prompt() {
                 max_turns: 1,
                 enable_thinking: false,
                 stream: false,
-                working_memory_messages: 12,
+                context_budget: ContextBudget::default(),
             },
         )
         .unwrap();
@@ -298,7 +298,7 @@ fn run_uses_context_manager_system_prompt() {
 }
 
 #[test]
-fn run_session_sends_bounded_working_memory_to_provider() {
+fn run_session_sends_full_history_to_provider_when_under_budget() {
     let work_dir = unique_temp_dir();
     fs::create_dir_all(&work_dir).unwrap();
 
@@ -324,7 +324,7 @@ fn run_session_sends_bounded_working_memory_to_provider() {
                 max_turns: 1,
                 enable_thinking: false,
                 stream: false,
-                working_memory_messages: 2,
+                context_budget: ContextBudget::default(),
             },
             &mut crate::reporter::terminal::TerminalReporter,
         )
@@ -333,10 +333,94 @@ fn run_session_sends_bounded_working_memory_to_provider() {
     fs::remove_dir_all(&work_dir).unwrap();
 
     let messages = seen_messages.lock().unwrap().clone().unwrap();
-    assert_eq!(messages.len(), 3);
+    assert_eq!(messages.len(), 4);
     assert_eq!(messages[0].role, Role::System);
-    assert_eq!(messages[1].content, "recent assistant message");
-    assert_eq!(messages[2].content, "current user message");
+    assert_eq!(messages[1].content, "old user message");
+    assert_eq!(messages[2].content, "recent assistant message");
+    assert_eq!(messages[3].content, "current user message");
+}
+
+#[test]
+fn run_session_compacts_provider_context_without_mutating_session_history() {
+    let work_dir = unique_temp_dir();
+    fs::create_dir_all(&work_dir).unwrap();
+
+    let seen_messages = Arc::new(Mutex::new(None));
+    let mut engine = AgentEngine::new(
+        CapturingProvider::new(Arc::clone(&seen_messages)),
+        ToolRegistry::new(),
+        ContextManager::new(&work_dir, Vec::new()),
+        FileMemory::new(&work_dir),
+        Telemetry::default(),
+    );
+    let session = Session::new("chat_1", &work_dir);
+    let long_output = "0123456789".repeat(30);
+    session.append_many([
+        Message::user("please read the log"),
+        Message::assistant_with_tools(
+            "",
+            vec![ToolCall::new(
+                "call_1",
+                "read_file",
+                json!({ "path": "large.log" }),
+            )],
+        ),
+        Message::observation("call_1", long_output.clone()),
+        Message::user("next task"),
+    ]);
+
+    engine
+        .run_session_with_reporter(
+            &session,
+            "current user message",
+            super::RunOptions {
+                max_turns: 1,
+                enable_thinking: false,
+                stream: false,
+                context_budget: ContextBudget {
+                    max_chars: 80,
+                    retain_recent_messages: 2,
+                    max_recent_observation_chars: 40,
+                    far_observation_mask_chars: 20,
+                    far_assistant_fold_chars: 20,
+                    head_chars: 8,
+                    tail_chars: 8,
+                },
+            },
+            &mut crate::reporter::terminal::TerminalReporter,
+        )
+        .unwrap();
+
+    fs::remove_dir_all(&work_dir).unwrap();
+
+    let messages = seen_messages.lock().unwrap().clone().unwrap();
+    let compacted_observation = messages
+        .iter()
+        .find(|message| message.tool_call_id.as_deref() == Some("call_1"))
+        .expect("provider context should include the tool observation");
+    assert!(
+        compacted_observation
+            .content
+            .contains("tool output compacted")
+    );
+    assert_eq!(
+        compacted_observation.tool_call_id.as_deref(),
+        Some("call_1")
+    );
+    assert!(messages.iter().any(|message| {
+        message
+            .tool_calls
+            .iter()
+            .any(|tool_call| tool_call.id == "call_1")
+    }));
+
+    let history = session.history();
+    assert!(
+        history
+            .iter()
+            .any(|message| message.tool_call_id.as_deref() == Some("call_1")
+                && message.content == long_output)
+    );
 }
 
 #[test]
@@ -358,7 +442,7 @@ fn run_session_keeps_provider_context_isolated_by_session() {
         max_turns: 1,
         enable_thinking: false,
         stream: false,
-        working_memory_messages: 12,
+        context_budget: ContextBudget::default(),
     };
 
     engine

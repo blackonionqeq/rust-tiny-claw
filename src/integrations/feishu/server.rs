@@ -1,4 +1,5 @@
 use crate::app::build_engine;
+use crate::context_engine::ContextBudget;
 use crate::engine::RunOptions;
 use crate::integrations::feishu::client::FeishuClient;
 use crate::integrations::feishu::config::FeishuConfig;
@@ -119,7 +120,7 @@ async fn handle_event(
                             max_turns: 12,
                             enable_thinking: false,
                             stream: false,
-                            working_memory_messages: 12,
+                            context_budget: ContextBudget::default(),
                         };
                         engine.run_session_with_reporter(
                             &session,

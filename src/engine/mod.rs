@@ -1,4 +1,4 @@
-use crate::context_engine::{ContextError, ContextManager};
+use crate::context_engine::{ContextBudget, ContextCompactor, ContextError, ContextManager};
 use crate::memory::{FileMemory, Session};
 use crate::provider::{Provider, ProviderError, StdoutStreamSink};
 use crate::reporter::terminal::TerminalReporter;
@@ -105,10 +105,12 @@ where
         for turn in 1..=options.max_turns {
             reporter.on_turn_start(turn)?;
 
-            // The session owns long-term history. Each provider call receives only
-            // the current system prompt plus a bounded working-memory window.
+            // The session owns the full transcript. Provider calls receive a
+            // temporary compacted copy so long-lived sessions keep their original
+            // history while model requests stay within the configured budget.
             let mut messages = vec![Message::system(self.context.build_system_prompt()?)];
-            messages.extend(session.working_memory(options.working_memory_messages));
+            messages.extend(session.history());
+            let mut messages = ContextCompactor::new(options.context_budget).compact(&messages);
 
             let available_tools = self.registry.definitions();
             if options.enable_thinking {
@@ -269,7 +271,7 @@ pub struct RunOptions {
     pub max_turns: usize,
     pub enable_thinking: bool,
     pub stream: bool,
-    pub working_memory_messages: usize,
+    pub context_budget: ContextBudget,
 }
 
 impl Default for RunOptions {
@@ -278,7 +280,7 @@ impl Default for RunOptions {
             max_turns: 16,
             enable_thinking: false,
             stream: true,
-            working_memory_messages: 12,
+            context_budget: ContextBudget::default(),
         }
     }
 }
