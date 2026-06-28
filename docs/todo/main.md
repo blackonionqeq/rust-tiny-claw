@@ -25,3 +25,7 @@
 
 - Add a minimal integration smoke test gated by a real API key.
 - Add CLI flags when environment-only configuration becomes limiting.
+
+## Integrations
+
+- Track Feishu gateway follow-ups in `docs/todo/feishu.md`.
