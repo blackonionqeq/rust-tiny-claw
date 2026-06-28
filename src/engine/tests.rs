@@ -2,12 +2,12 @@ use super::AgentEngine;
 use crate::context_engine::ContextManager;
 use crate::memory::FileMemory;
 use crate::provider::{Provider, ProviderError};
-use crate::schema::{Message, ToolCall, ToolDefinition, ToolResult};
+use crate::schema::{Message, Role, ToolCall, ToolDefinition, ToolResult};
 use crate::telemetry::Telemetry;
 use crate::tools::{Tool, ToolAccessMode, ToolRegistry};
 use serde_json::json;
 use std::fs;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 struct NoopProvider;
@@ -22,6 +22,31 @@ impl Provider for NoopProvider {
         _messages: &[Message],
         _available_tools: Option<&[ToolDefinition]>,
     ) -> Result<Message, ProviderError> {
+        Ok(Message::assistant("done"))
+    }
+}
+
+struct CapturingProvider {
+    seen_messages: Arc<Mutex<Option<Vec<Message>>>>,
+}
+
+impl CapturingProvider {
+    fn new(seen_messages: Arc<Mutex<Option<Vec<Message>>>>) -> Self {
+        Self { seen_messages }
+    }
+}
+
+impl Provider for CapturingProvider {
+    fn name(&self) -> &'static str {
+        "capturing"
+    }
+
+    fn generate(
+        &mut self,
+        messages: &[Message],
+        _available_tools: Option<&[ToolDefinition]>,
+    ) -> Result<Message, ProviderError> {
+        *self.seen_messages.lock().unwrap() = Some(messages.to_vec());
         Ok(Message::assistant("done"))
     }
 }
@@ -197,6 +222,52 @@ fn mutating_tool_batch_runs_sequentially() {
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].output, "");
     assert_eq!(results[1].output, "first");
+}
+
+#[test]
+fn run_uses_context_manager_system_prompt() {
+    let work_dir = unique_temp_dir();
+    fs::create_dir_all(&work_dir).unwrap();
+    fs::write(
+        work_dir.join("AGENTS.md"),
+        "Follow workspace instructions.\n",
+    )
+    .unwrap();
+    let skill_dir = work_dir.join(".tiny-claw").join("skills").join("rust");
+    fs::create_dir_all(&skill_dir).unwrap();
+    fs::write(skill_dir.join("SKILL.md"), "# Rust Skill\nPrefer cargo.\n").unwrap();
+
+    let seen_messages = Arc::new(Mutex::new(None));
+    let mut engine = AgentEngine::new(
+        CapturingProvider::new(Arc::clone(&seen_messages)),
+        ToolRegistry::new(),
+        ContextManager::new(&work_dir, vec!["rust".to_string()]),
+        FileMemory::new(&work_dir),
+        Telemetry::default(),
+    );
+
+    engine
+        .run_with_options(
+            "hello",
+            super::RunOptions {
+                max_turns: 1,
+                enable_thinking: false,
+                stream: false,
+            },
+        )
+        .unwrap();
+
+    fs::remove_dir_all(&work_dir).unwrap();
+
+    let messages = seen_messages.lock().unwrap().clone().unwrap();
+    assert_eq!(messages[0].role, Role::System);
+    assert!(
+        messages[0]
+            .content
+            .contains("Follow workspace instructions.")
+    );
+    assert!(messages[0].content.contains("## rust"));
+    assert!(messages[0].content.contains("Prefer cargo."));
 }
 
 fn unique_temp_dir() -> std::path::PathBuf {

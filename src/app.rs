@@ -11,6 +11,7 @@ pub fn build_engine(
     work_dir: &Path,
 ) -> Result<AgentEngine<Box<dyn Provider>>, Box<dyn std::error::Error>> {
     let provider = build_provider()?;
+    let active_skills = active_skills_from_env();
 
     let mut registry = ToolRegistry::new();
     registry.register(ReadFileTool::new(work_dir)?)?;
@@ -22,7 +23,7 @@ pub fn build_engine(
     Ok(AgentEngine::new(
         provider,
         registry,
-        ContextManager::default(),
+        ContextManager::new(work_dir, active_skills),
         FileMemory::new(".tiny-claw"),
         Telemetry::default(),
     ))
@@ -41,6 +42,21 @@ fn parse_bool_env(name: &str, value: &str) -> Result<bool, Box<dyn std::error::E
         "0" | "false" | "FALSE" | "False" | "no" | "NO" | "No" => Ok(false),
         _ => Err(format!("invalid {name} value: {value}").into()),
     }
+}
+
+fn active_skills_from_env() -> Vec<String> {
+    env::var("TINY_CLAW_SKILLS")
+        .ok()
+        .into_iter()
+        .flat_map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|skill| !skill.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 fn build_provider() -> Result<Box<dyn Provider>, Box<dyn std::error::Error>> {

@@ -1,4 +1,4 @@
-use crate::context_engine::ContextManager;
+use crate::context_engine::{ContextError, ContextManager};
 use crate::memory::FileMemory;
 use crate::provider::{Provider, ProviderError, StdoutStreamSink};
 use crate::reporter::terminal::TerminalReporter;
@@ -76,11 +76,9 @@ where
         reporter: &mut dyn Reporter,
     ) -> Result<Vec<Message>, EngineError> {
         // The message list is the agent's short-term memory for this lesson.
-        // Later chapters can move prompt loading and compaction into ContextManager.
+        // Prompt sources are assembled by ContextManager before the first model call.
         let mut messages = vec![
-            Message::system(
-                "You are rust-tiny-claw, a small coding assistant running inside one workspace.",
-            ),
+            Message::system(self.context.build_system_prompt()?),
             Message::user(user_prompt),
         ];
 
@@ -252,6 +250,7 @@ impl Default for RunOptions {
 
 #[derive(Debug)]
 pub enum EngineError {
+    Context(ContextError),
     Provider(ProviderError),
     Reporter(ReporterError),
     TurnLimitExceeded { max_turns: usize },
@@ -260,6 +259,7 @@ pub enum EngineError {
 impl fmt::Display for EngineError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Context(error) => write!(formatter, "context failed: {error}"),
             Self::Provider(error) => write!(formatter, "provider failed: {error}"),
             Self::Reporter(error) => write!(formatter, "reporter failed: {error}"),
             Self::TurnLimitExceeded { max_turns } => {
@@ -270,6 +270,12 @@ impl fmt::Display for EngineError {
 }
 
 impl std::error::Error for EngineError {}
+
+impl From<ContextError> for EngineError {
+    fn from(error: ContextError) -> Self {
+        Self::Context(error)
+    }
+}
 
 impl From<ProviderError> for EngineError {
     fn from(error: ProviderError) -> Self {
