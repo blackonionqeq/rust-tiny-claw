@@ -21,6 +21,13 @@
 - Later: evaluate head/tail previews and shared tool-output offloading on top of
   the existing ranged `read_file` support.
 
+## Context Engine
+
+- Later: add progressive skill loading so enabled skills can start with compact
+  metadata or summaries and load full `SKILL.md` or referenced resources only
+  when needed. This should prevent large skill sets from inflating the initial
+  system prompt.
+
 ## Runtime
 
 - Add a minimal integration smoke test gated by a real API key.
