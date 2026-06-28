@@ -66,6 +66,11 @@ To test explicitly enabled skills, create Codex-style skill files such as
 wsl -d Ubuntu -- bash -lc "TINY_CLAW_SKILLS=rust cargo run --bin tiny-claw -- -C /mnt/d/codes/other-project 'Use the active skill and inspect this repository.'"
 ```
 
+Enabled skills are advertised to the model as compact metadata first. The model
+can call `load_skill` to load the full `SKILL.md` body when relevant. Add
+`disable-model-invocation: true` to a skill's frontmatter to keep it out of the
+model-visible catalog and prevent model-initiated loading.
+
 ## Tool Dispatch
 
 The harness supports lesson 8 parallel tool calling for read-only batches. When
@@ -96,12 +101,14 @@ Registered workspace tools:
   and ask the model to provide more context.
 - `grep`: searches workspace files with ripgrep-compatible regular expressions,
   optional path narrowing, case sensitivity, context lines, and bounded output.
+- `load_skill`: loads the full body for an enabled model-invokable skill from
+  `.tiny-claw/skills/<skill-id>/SKILL.md`.
 
-`read_file`, `write_file`, `edit_file`, and `grep` reject absolute paths and
-paths that escape the workspace. `grep` prefers `rg` in `PATH`, falls back to
-system `grep` when `rg` is missing, and reports a clear observation if neither
-command is available. The fallback may not follow ripgrep's ignore rules.
-`bash` follows the course's local YOLO execution model, but still binds
+`read_file`, `write_file`, `edit_file`, `grep`, and `load_skill` reject absolute
+paths or ids that escape the workspace. `grep` prefers `rg` in `PATH`, falls
+back to system `grep` when `rg` is missing, and reports a clear observation if
+neither command is available. The fallback may not follow ripgrep's ignore
+rules. `bash` follows the course's local YOLO execution model, but still binds
 execution to the workspace and enforces resource limits.
 
 ## Feishu Integration

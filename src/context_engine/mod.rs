@@ -1,10 +1,12 @@
 mod skills;
 
-use skills::load_active_skills;
+use skills::load_active_skill_manifests;
 use std::fmt;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
+
+pub use skills::{SkillDocument, SkillManifest, load_model_invokable_skill};
 
 const BASE_INSTRUCTIONS: &str =
     "You are rust-tiny-claw, a small coding assistant running inside one workspace.";
@@ -41,16 +43,27 @@ impl ContextManager {
             ));
         }
 
-        let skills = load_active_skills(&self.work_dir, &self.active_skills)?;
-        if !skills.is_empty() {
-            let mut rendered = String::from("# Active Skills");
-            for skill in skills {
+        let skills = load_active_skill_manifests(&self.work_dir, &self.active_skills)?;
+        let model_invokable_skills = skills
+            .into_iter()
+            .filter(|skill| !skill.disable_model_invocation)
+            .collect::<Vec<_>>();
+        if !model_invokable_skills.is_empty() {
+            let mut rendered = String::from(
+                "# Available Skills\n\nThe following enabled skills can be loaded when relevant. To use one, call load_skill with its id.",
+            );
+            for skill in model_invokable_skills {
                 rendered.push_str(&format!(
-                    "\n\n## {}\n\nSource: {}\n\n{}",
+                    "\n\n- id: {}\n  name: {}\n  source: {}",
                     skill.id,
-                    skill.source.display(),
-                    skill.body.trim()
+                    skill.name,
+                    skill.source.display()
                 ));
+                if let Some(description) = skill.description {
+                    if !description.is_empty() {
+                        rendered.push_str(&format!("\n  description: {description}"));
+                    }
+                }
             }
             sections.push(rendered);
         }
@@ -80,15 +93,34 @@ impl Default for ContextManager {
 #[derive(Debug)]
 pub enum ContextError {
     InvalidSkillId(String),
+    InvalidSkillMetadata { path: PathBuf, message: String },
     ReadFile { path: PathBuf, source: io::Error },
+    SkillModelInvocationDisabled(String),
+    SkillNotEnabled(String),
 }
 
 impl fmt::Display for ContextError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidSkillId(skill_id) => write!(formatter, "invalid skill id: {skill_id}"),
+            Self::InvalidSkillMetadata { path, message } => {
+                write!(
+                    formatter,
+                    "invalid skill metadata in {}: {message}",
+                    path.display()
+                )
+            }
             Self::ReadFile { path, source } => {
                 write!(formatter, "failed to read {}: {source}", path.display())
+            }
+            Self::SkillModelInvocationDisabled(skill_id) => {
+                write!(
+                    formatter,
+                    "skill '{skill_id}' is disabled for model invocation"
+                )
+            }
+            Self::SkillNotEnabled(skill_id) => {
+                write!(formatter, "skill '{skill_id}' is not enabled")
             }
         }
     }
@@ -97,7 +129,10 @@ impl fmt::Display for ContextError {
 impl std::error::Error for ContextError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::InvalidSkillId(_) => None,
+            Self::InvalidSkillId(_)
+            | Self::InvalidSkillMetadata { .. }
+            | Self::SkillModelInvocationDisabled(_)
+            | Self::SkillNotEnabled(_) => None,
             Self::ReadFile { source, .. } => Some(source),
         }
     }
@@ -143,9 +178,13 @@ mod tests {
     }
 
     #[test]
-    fn active_skills_render_in_requested_order() {
+    fn active_skills_render_catalog_in_requested_order() {
         let work_dir = unique_temp_dir();
-        write_skill(&work_dir, "rust", "# Rust Skill\n");
+        write_skill(
+            &work_dir,
+            "rust",
+            "---\nname: Rust\ndescription: Rust workflows\n---\n\n# Rust Skill\n",
+        );
         write_skill(&work_dir, "git", "# Git Skill\n");
 
         let prompt = ContextManager::new(&work_dir, vec!["git".to_string(), "rust".to_string()])
@@ -154,30 +193,37 @@ mod tests {
 
         fs::remove_dir_all(&work_dir).unwrap();
 
-        let git_index = prompt.find("## git").unwrap();
-        let rust_index = prompt.find("## rust").unwrap();
+        let git_index = prompt.find("id: git").unwrap();
+        let rust_index = prompt.find("id: rust").unwrap();
         assert!(git_index < rust_index);
-        assert!(prompt.contains("# Git Skill"));
-        assert!(prompt.contains("# Rust Skill"));
+        assert!(prompt.contains("# Available Skills"));
+        assert!(prompt.contains("id: git"));
+        assert!(prompt.contains("id: rust"));
+        assert!(prompt.contains("name: Rust"));
+        assert!(prompt.contains("description: Rust workflows"));
+        assert!(!prompt.contains("# Git Skill"));
+        assert!(!prompt.contains("# Rust Skill"));
     }
 
     #[test]
-    fn active_skill_frontmatter_is_not_rendered() {
+    fn hidden_active_skill_is_not_rendered_in_catalog() {
         let work_dir = unique_temp_dir();
         write_skill(
             &work_dir,
-            "rust",
-            "---\nname: rust\ndescription: Rust conventions\n---\n\n# Rust Skill\n",
+            "secret",
+            "---\nname: Secret\ndescription: Hidden workflow\ndisable-model-invocation: true\n---\n\n# Secret Skill\n",
         );
 
-        let prompt = ContextManager::new(&work_dir, vec!["rust".to_string()])
+        let prompt = ContextManager::new(&work_dir, vec!["secret".to_string()])
             .build_system_prompt()
             .unwrap();
 
         fs::remove_dir_all(&work_dir).unwrap();
 
-        assert!(prompt.contains("# Rust Skill"));
-        assert!(!prompt.contains("description: Rust conventions"));
+        assert!(!prompt.contains("# Available Skills"));
+        assert!(!prompt.contains("secret"));
+        assert!(!prompt.contains("Hidden workflow"));
+        assert!(!prompt.contains("# Secret Skill"));
     }
 
     fn write_skill(work_dir: &Path, skill_id: &str, content: &str) {

@@ -266,8 +266,9 @@ fn run_uses_context_manager_system_prompt() {
             .content
             .contains("Follow workspace instructions.")
     );
-    assert!(messages[0].content.contains("## rust"));
-    assert!(messages[0].content.contains("Prefer cargo."));
+    assert!(messages[0].content.contains("# Available Skills"));
+    assert!(messages[0].content.contains("id: rust"));
+    assert!(!messages[0].content.contains("Prefer cargo."));
 }
 
 fn unique_temp_dir() -> std::path::PathBuf {

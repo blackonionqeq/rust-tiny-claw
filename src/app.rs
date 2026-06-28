@@ -3,7 +3,9 @@ use crate::engine::AgentEngine;
 use crate::memory::FileMemory;
 use crate::provider::{ClaudeCompatibleProvider, MockProvider, OpenAiCompatibleProvider, Provider};
 use crate::telemetry::Telemetry;
-use crate::tools::{BashTool, EditFileTool, GrepTool, ReadFileTool, ToolRegistry, WriteFileTool};
+use crate::tools::{
+    BashTool, EditFileTool, GrepTool, LoadSkillTool, ReadFileTool, ToolRegistry, WriteFileTool,
+};
 use std::env;
 use std::path::Path;
 
@@ -16,6 +18,7 @@ pub fn build_engine(
 
     let mut registry = ToolRegistry::new();
     registry.register(ReadFileTool::new(&work_dir)?)?;
+    registry.register(LoadSkillTool::new(&work_dir, active_skills.clone())?)?;
     registry.register(WriteFileTool::new(&work_dir)?)?;
     registry.register(BashTool::new(&work_dir)?)?;
     registry.register(EditFileTool::new(&work_dir)?)?;
