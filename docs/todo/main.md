@@ -24,7 +24,9 @@
 ## Runtime
 
 - Add a minimal integration smoke test gated by a real API key.
-- Add CLI flags when environment-only configuration becomes limiting.
+- Add provider/runtime CLI flags when environment-only configuration becomes
+  limiting. Prompt input and workspace override are already available through
+  positional CLI text, stdin, `--workspace`, and `-C`.
 
 ## Integrations
 

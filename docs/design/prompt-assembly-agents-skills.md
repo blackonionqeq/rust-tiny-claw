@@ -25,7 +25,7 @@ The engine keeps responsibility for the ReAct loop, provider calls, tool
 dispatch, and message history. `ContextManager` owns prompt sources, prompt
 ordering, and rendering.
 
-The rendered system prompt should use stable sections:
+The rendered system prompt uses stable sections:
 
 ```text
 # Base Instructions
@@ -36,18 +36,21 @@ The rendered system prompt should use stable sections:
 
 <AGENTS.md content, when present>
 
-# Active Skills
+# Available Skills
 
-## <skill id>
+The following enabled skills can be loaded when relevant. To use one, call
+load_skill with its id.
 
-Source: <relative path to SKILL.md>
-
-<skill body>
+- id: <skill id>
+  name: <display name>
+  source: <relative path to SKILL.md>
+  description: <optional description>
 ```
 
 The order is fixed: base instructions first, workspace instructions second,
-skills last. This makes test snapshots and model behavior easier to reason
-about.
+skill catalog last. Full skill bodies are no longer injected into the initial
+prompt; see `docs/design/progressive-skill-loading.md` for the follow-up design
+that added the `load_skill` tool.
 
 ## AGENTS.md Loading
 
@@ -98,6 +101,7 @@ whitespace.
 ---
 name: rust
 description: Rust project conventions and Cargo workflows.
+disable-model-invocation: false
 ---
 
 # Rust Skill
@@ -107,9 +111,12 @@ The initial parser should be deliberately small:
 
 - Detect frontmatter only when the file starts with `---`.
 - End frontmatter at the next line containing only `---`.
-- Parse simple `key: value` pairs for `name` and `description`.
+- Parse simple `key: value` pairs for `name`, `description`, and
+  `disable-model-invocation`.
 - Treat unsupported YAML features as plain text rather than blocking the skill.
 - Use the directory name as the skill id even when frontmatter includes `name`.
+- Treat `disable-model-invocation` as a strict boolean permission field when it
+  is present; invalid values are context errors.
 
 This avoids adding `serde_yaml` or another YAML parser for two optional fields.
 If future skills need nested metadata, arrays, or typed configuration, revisit a
@@ -144,6 +151,8 @@ available as resources but are not prompt text by default.
 | Skill id not found | Return context error |
 | `SKILL.md` unreadable | Return context error |
 | Frontmatter malformed | Treat full file as Markdown body |
+| Invalid `disable-model-invocation` value | Return context error |
+| `disable-model-invocation: true` | Hide from model-visible skill catalog |
 | Skill body empty | Allow it |
 
 ## Testing
@@ -152,10 +161,11 @@ Add focused unit tests for `context_engine`:
 
 - Base prompt renders without workspace instructions or skills.
 - `AGENTS.md` content appears in the workspace section.
-- Explicit skills render in environment order.
+- Explicit skill catalog entries render in environment order.
 - Missing explicit skills return a clear error.
-- Frontmatter is stripped from the rendered skill body when valid.
+- Frontmatter metadata is reflected in the skill catalog when valid.
 - Malformed frontmatter falls back to rendering the full file body.
+- Hidden skills do not appear in the model-visible catalog.
 
 Integration with `AgentEngine` only needs a narrow test proving the engine uses
 the `ContextManager` output as the first system message. Provider behavior,

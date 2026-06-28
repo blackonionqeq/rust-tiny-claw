@@ -152,6 +152,8 @@ Common variables:
 - `TINY_CLAW_TIMEOUT_SECONDS`: HTTP timeout, default `60`.
 - `TINY_CLAW_STREAM`: `true` by default; set `false` to print complete messages
   after each provider call.
+- `TINY_CLAW_SKILLS`: optional comma-separated skill ids loaded from
+  `.tiny-claw/skills/<skill-id>/SKILL.md`.
 
 Claude-compatible providers also use:
 

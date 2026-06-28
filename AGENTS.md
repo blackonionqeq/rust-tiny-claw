@@ -23,11 +23,16 @@ The desired architecture is a small, explicit Harness runtime:
 - Use clear traits at module boundaries, especially for providers and tools.
 - Add real behavior incrementally as the course reaches that topic.
 - Keep placeholders small and compileable.
-- Avoid implementing Feishu, compaction, subagents, tracing, or benchmarks before
-  their matching lessons unless explicitly requested.
+- Avoid extending Feishu beyond the documented gateway scope, or implementing
+  compaction, subagents, tracing, or benchmarks before their matching lessons
+  unless explicitly requested.
 - Keep gateway-specific usage docs under `docs/usage/`, such as
   `docs/usage/feishu.md`, and link them from `README.md` instead of expanding
   the README with deployment details.
+- Keep skill behavior documented in README for users and under `docs/design/`
+  for design details. Do not inject full skill bodies into the initial prompt;
+  use the model-visible catalog plus `load_skill` flow unless a later lesson
+  explicitly changes that architecture.
 
 ## Git And Commit Style
 
