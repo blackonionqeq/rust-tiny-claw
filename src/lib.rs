@@ -3,6 +3,7 @@ pub mod context_engine;
 pub mod engine;
 pub mod integrations;
 pub mod memory;
+pub mod plan_mode;
 pub mod provider;
 pub mod reporter;
 pub mod schema;

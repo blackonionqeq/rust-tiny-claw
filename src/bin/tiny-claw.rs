@@ -2,9 +2,10 @@ use rust_tiny_claw::app::{build_engine, stream_enabled};
 use rust_tiny_claw::context_engine::ContextBudget;
 use rust_tiny_claw::engine::RunOptions;
 use rust_tiny_claw::memory::SessionManager;
+use rust_tiny_claw::plan_mode::PlanModeSetting;
 use std::env;
 use std::io::{self, IsTerminal, Read};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 const SMOKE_PROMPT: &str = "Smoke-test the lesson 8 harness. Create .tiny-claw/smoke/edit-target.rs with an indented TODO auth block. Read it once. Then call edit_file exactly once to replace that block with a Forbidden return; in old_text, omit the original indentation so the fuzzy indentation fallback is exercised. Read the file once more to confirm the replacement. Do not repeat the edit flow after it succeeds. Finally, read Cargo.toml, README.md, and src/bin/tiny-claw.rs and call grep for TODO in one independent batch so the engine can execute multiple read-only tool calls in parallel.";
 
@@ -41,23 +42,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CliInput {
     work_dir: PathBuf,
-    plan_mode: CliPlanMode,
+    plan_mode: PlanModeSetting,
     prompt: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CliPlanMode {
-    Auto,
-    On,
-}
-
-impl CliPlanMode {
-    fn resolve(self, prompt: &str, work_dir: &Path) -> bool {
-        match self {
-            Self::On => true,
-            Self::Auto => should_enable_plan_mode(prompt, work_dir),
-        }
-    }
 }
 
 fn cli_input_from_process() -> Result<CliInput, Box<dyn std::error::Error>> {
@@ -82,14 +68,14 @@ fn parse_cli_input(
     default_work_dir: PathBuf,
 ) -> Result<CliInput, String> {
     let mut work_dir = default_work_dir;
-    let mut plan_mode = CliPlanMode::Auto;
+    let mut plan_mode = PlanModeSetting::Auto;
     let mut prompt_parts = Vec::new();
     let mut index = 0;
 
     while index < args.len() {
         match args[index].as_str() {
             "--plan" => {
-                plan_mode = CliPlanMode::On;
+                plan_mode = PlanModeSetting::On;
             }
             "--plan-mode" => {
                 index += 1;
@@ -131,62 +117,14 @@ fn parse_cli_input(
     })
 }
 
-fn parse_plan_mode(value: &str) -> Result<CliPlanMode, String> {
+fn parse_plan_mode(value: &str) -> Result<PlanModeSetting, String> {
     match value {
-        "on" | "ON" | "On" => Ok(CliPlanMode::On),
-        "auto" | "AUTO" | "Auto" => Ok(CliPlanMode::Auto),
+        "on" | "ON" | "On" => Ok(PlanModeSetting::On),
+        "auto" | "AUTO" | "Auto" => Ok(PlanModeSetting::Auto),
         _ => Err(format!(
             "invalid --plan-mode value: {value}; expected on or auto"
         )),
     }
-}
-
-fn should_enable_plan_mode(prompt: &str, work_dir: &Path) -> bool {
-    if work_dir.join("PLAN.md").is_file() || work_dir.join("TODO.md").is_file() {
-        return true;
-    }
-
-    let normalized = prompt.to_lowercase();
-    let complex_markers = [
-        "refactor",
-        "implement",
-        "migrate",
-        "tests",
-        "continue",
-        "plan",
-        "todo",
-        "step by step",
-        "multi-file",
-        "project",
-        "architecture",
-        "重构",
-        "实现",
-        "迁移",
-        "测试",
-        "继续",
-        "计划",
-        "待办",
-        "分步骤",
-        "项目",
-        "架构",
-        "多个文件",
-    ];
-    let connector_markers = [" and ", " then ", " also ", "并且", "同时", "然后", "以及"];
-
-    if normalized.chars().count() >= 120 {
-        return true;
-    }
-
-    let complex_hits = complex_markers
-        .iter()
-        .filter(|marker| normalized.contains(**marker))
-        .count();
-    let connector_hits = connector_markers
-        .iter()
-        .filter(|marker| normalized.contains(**marker))
-        .count();
-
-    complex_hits >= 2 || (complex_hits >= 1 && connector_hits >= 1)
 }
 
 #[cfg(test)]
@@ -203,7 +141,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(input.work_dir, PathBuf::from("/default"));
-        assert_eq!(input.plan_mode, CliPlanMode::Auto);
+        assert_eq!(input.plan_mode, PlanModeSetting::Auto);
         assert_eq!(input.prompt, "inspect skills");
     }
 
@@ -217,7 +155,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(input.prompt, "use rust skill");
-        assert_eq!(input.plan_mode, CliPlanMode::Auto);
+        assert_eq!(input.plan_mode, PlanModeSetting::Auto);
     }
 
     #[test]
@@ -225,7 +163,7 @@ mod tests {
         let input = parse_cli_input(Vec::new(), None, PathBuf::from("/default")).unwrap();
 
         assert_eq!(input.prompt, SMOKE_PROMPT);
-        assert_eq!(input.plan_mode, CliPlanMode::Auto);
+        assert_eq!(input.plan_mode, PlanModeSetting::Auto);
     }
 
     #[test]
@@ -242,7 +180,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(input.work_dir, PathBuf::from("/tmp/project"));
-        assert_eq!(input.plan_mode, CliPlanMode::Auto);
+        assert_eq!(input.plan_mode, PlanModeSetting::Auto);
         assert_eq!(input.prompt, "inspect");
     }
 
@@ -260,7 +198,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(input.work_dir, PathBuf::from("/tmp/project"));
-        assert_eq!(input.plan_mode, CliPlanMode::Auto);
+        assert_eq!(input.plan_mode, PlanModeSetting::Auto);
         assert_eq!(input.prompt, "inspect");
     }
 
@@ -290,7 +228,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(input.work_dir, PathBuf::from("/default"));
-        assert_eq!(input.plan_mode, CliPlanMode::On);
+        assert_eq!(input.plan_mode, PlanModeSetting::On);
         assert_eq!(input.prompt, "build feature");
     }
 
@@ -310,7 +248,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(input.work_dir, PathBuf::from("/tmp/project"));
-        assert_eq!(input.plan_mode, CliPlanMode::On);
+        assert_eq!(input.plan_mode, PlanModeSetting::On);
         assert_eq!(input.prompt, "continue");
     }
 
@@ -327,7 +265,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(input.plan_mode, CliPlanMode::Auto);
+        assert_eq!(input.plan_mode, PlanModeSetting::Auto);
         assert_eq!(input.prompt, "inspect");
     }
 
@@ -341,29 +279,5 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error, "--plan-mode requires on or auto");
-    }
-
-    #[test]
-    fn auto_plan_mode_enables_for_complex_prompt() {
-        assert!(should_enable_plan_mode(
-            "Refactor the project architecture and add tests",
-            &PathBuf::from("/missing"),
-        ));
-        assert!(should_enable_plan_mode(
-            "继续实现这个项目，并且补充测试",
-            &PathBuf::from("/missing"),
-        ));
-    }
-
-    #[test]
-    fn auto_plan_mode_stays_light_for_simple_prompt() {
-        assert!(!should_enable_plan_mode(
-            "List files",
-            &PathBuf::from("/missing"),
-        ));
-        assert!(!should_enable_plan_mode(
-            "解释这个函数",
-            &PathBuf::from("/missing"),
-        ));
     }
 }

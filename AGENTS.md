@@ -55,7 +55,7 @@ Windows SDK link libraries are not available in this shell.
 From PowerShell, run:
 
 ```powershell
-wsl -d Ubuntu -- bash -lc "cd <repo-wsl-path> && cargo fmt --check"
+wsl -d Ubuntu -- bash -lc "cd <repo-wsl-path> && cargo fmt && cargo fmt --check"
 wsl -d Ubuntu -- bash -lc "cd <repo-wsl-path> && cargo check"
 wsl -d Ubuntu -- bash -lc "cd <repo-wsl-path> && cargo run"
 ```
@@ -69,7 +69,7 @@ cargo check
 Before finishing code changes, run at least:
 
 ```powershell
-wsl -d Ubuntu -- bash -lc "cd <repo-wsl-path> && cargo fmt --check && cargo check"
+wsl -d Ubuntu -- bash -lc "cd <repo-wsl-path> && cargo fmt && cargo fmt --check && cargo check"
 ```
 
 For behavior changes to the startup path, also run:
