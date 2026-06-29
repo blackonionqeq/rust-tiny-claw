@@ -77,6 +77,47 @@ impl Provider for RecordingProvider {
     }
 }
 
+struct FailingThenCapturingProvider {
+    calls: Arc<Mutex<Vec<Vec<Message>>>>,
+    call_count: usize,
+}
+
+impl FailingThenCapturingProvider {
+    fn new(calls: Arc<Mutex<Vec<Vec<Message>>>>) -> Self {
+        Self {
+            calls,
+            call_count: 0,
+        }
+    }
+}
+
+impl Provider for FailingThenCapturingProvider {
+    fn name(&self) -> &'static str {
+        "failing-then-capturing"
+    }
+
+    fn generate(
+        &mut self,
+        messages: &[Message],
+        _available_tools: Option<&[ToolDefinition]>,
+    ) -> Result<Message, ProviderError> {
+        self.calls.lock().unwrap().push(messages.to_vec());
+        self.call_count += 1;
+        if self.call_count <= 3 {
+            return Ok(Message::assistant_with_tools(
+                "",
+                vec![ToolCall::new(
+                    format!("call_{}", self.call_count),
+                    "edit_file",
+                    json!({ "path": format!("src/file_{}.rs", self.call_count) }),
+                )],
+            ));
+        }
+
+        Ok(Message::assistant("done"))
+    }
+}
+
 struct DelayTool;
 
 impl Tool for DelayTool {
@@ -302,6 +343,51 @@ fn tool_errors_are_enhanced_with_recovery_guidance() {
             .contains("old_text was not found in the file")
     );
     assert!(results[0].output.contains("Read the target file again"));
+}
+
+#[test]
+fn run_injects_system_reminder_after_repeated_tool_failures() {
+    let work_dir = tempdir().unwrap();
+
+    let mut registry = ToolRegistry::new();
+    registry.register(ErrorTool).unwrap();
+
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let mut engine = AgentEngine::new(
+        FailingThenCapturingProvider::new(Arc::clone(&calls)),
+        registry,
+        ContextManager::new(work_dir.path(), Vec::new()),
+        FileMemory::new(work_dir.path()),
+        Telemetry::default(),
+    );
+
+    let transcript = engine
+        .run_with_options(
+            "try a few edits",
+            super::RunOptions {
+                max_turns: 4,
+                enable_thinking: false,
+                plan_mode: false,
+                stream: false,
+                context_budget: ContextBudget::default(),
+            },
+        )
+        .unwrap();
+
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 4);
+    let fourth_call_messages = &calls[3];
+    assert!(
+        fourth_call_messages
+            .iter()
+            .any(|message| message.content.contains("[SYSTEM REMINDER]")
+                && message.content.contains("EDIT_TEXT_NOT_FOUND"))
+    );
+    assert!(
+        transcript
+            .iter()
+            .any(|message| message.content.contains("[SYSTEM REMINDER]"))
+    );
 }
 
 #[test]

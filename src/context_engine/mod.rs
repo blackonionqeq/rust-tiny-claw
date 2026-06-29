@@ -1,9 +1,11 @@
 mod compaction;
 mod recovery;
+mod reminder;
 mod skills;
 
 pub use compaction::{ContextBudget, ContextCompactor};
 pub use recovery::{RecoveryAdvice, RecoveryCode, RecoveryManager};
+pub use reminder::ReminderManager;
 use skills::load_active_skill_manifests;
 use std::fmt;
 use std::fs;

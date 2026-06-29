@@ -1,5 +1,5 @@
 use crate::context_engine::{
-    ContextBudget, ContextCompactor, ContextError, ContextManager, RecoveryManager,
+    ContextBudget, ContextCompactor, ContextError, ContextManager, RecoveryManager, ReminderManager,
 };
 use crate::memory::{FileMemory, Session};
 use crate::provider::{Provider, ProviderError, StdoutStreamSink};
@@ -104,6 +104,7 @@ where
         // requests from the same chat cannot reorder history or tool results.
         let _run_guard = session.lock_run();
         session.append(Message::user(user_prompt));
+        let mut reminders = ReminderManager::new();
 
         for turn in 1..=options.max_turns {
             reporter.on_turn_start(turn)?;
@@ -176,10 +177,14 @@ where
             reporter.on_tool_calls(&tool_calls)?;
 
             let results = self.execute_tool_batch_with_reporter(&tool_calls, reporter)?;
+            let reminder = reminders.observe_tool_batch(&tool_calls, &results);
             for result in results {
                 reporter.on_tool_result(&result)?;
 
                 session.append(Message::observation(result.tool_call_id, result.output));
+            }
+            if let Some(reminder) = reminder {
+                session.append(reminder);
             }
         }
 
