@@ -216,6 +216,14 @@ fn normalize_rejection_reason(reason: Option<String>) -> String {
 }
 
 fn approval_card(approval_id: &str, call: &ToolCall, reason: &str) -> Value {
+    let content = format!(
+        "**Tool:** {}\n**Reason:** {}\n**Approval ID:** {}\n\n**Arguments**\n{}",
+        sanitize_lark_md(&call.name),
+        sanitize_lark_md(reason),
+        sanitize_lark_md(approval_id),
+        sanitize_lark_md(&argument_preview(&call.arguments))
+    );
+
     json!({
         "config": {
             "wide_screen_mode": true,
@@ -233,13 +241,7 @@ fn approval_card(approval_id: &str, call: &ToolCall, reason: &str) -> Value {
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": format!(
-                        "**Tool:** `{}`\n**Reason:** {}\n**Approval ID:** `{}`\n\n**Arguments**\n```json\n{}\n```",
-                        call.name,
-                        reason,
-                        approval_id,
-                        argument_preview(&call.arguments)
-                    )
+                    "content": content
                 }
             },
             {
@@ -289,6 +291,13 @@ fn argument_preview(arguments: &Value) -> String {
     truncate_chars(&rendered, MAX_ARGUMENT_PREVIEW_CHARS)
 }
 
+fn sanitize_lark_md(value: &str) -> String {
+    value
+        .replace('`', "'")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
 fn truncate_chars(value: &str, max_chars: usize) -> String {
     let mut chars = value.chars();
     let truncated = chars.by_ref().take(max_chars).collect::<String>();
@@ -317,10 +326,11 @@ pub fn callback_response(outcome: ResolveOutcome) -> Value {
 #[cfg(test)]
 mod tests {
     use super::{
-        ApprovalDecision, ApprovalManager, DEFAULT_REJECTION_REASON, ResolveOutcome,
+        ApprovalDecision, ApprovalManager, DEFAULT_REJECTION_REASON, ResolveOutcome, approval_card,
         normalize_rejection_reason,
     };
     use crate::integrations::feishu::event::{FeishuCallback, parse_callback};
+    use crate::schema::ToolCall;
     use serde_json::json;
     use std::time::Duration;
 
@@ -338,6 +348,29 @@ mod tests {
             normalize_rejection_reason(Some(" use dry-run first ".to_string())),
             "use dry-run first"
         );
+    }
+
+    #[test]
+    fn approval_card_avoids_markdown_code_html_tags() {
+        let call = ToolCall::new(
+            "call_1",
+            "bash",
+            json!({
+                "command": "printf `<code>` && rm -rf ./tmp"
+            }),
+        );
+
+        let card = approval_card(
+            "approval_1",
+            &call,
+            "recursive deletion requires human approval",
+        );
+        let content = card["elements"][0]["text"]["content"].as_str().unwrap();
+
+        assert!(!content.contains('`'));
+        assert!(!content.contains("```"));
+        assert!(content.contains("&lt;code&gt;"));
+        assert!(content.contains("\"command\""));
     }
 
     #[test]
