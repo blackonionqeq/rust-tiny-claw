@@ -40,10 +40,11 @@ TINY_CLAW_STREAM=false
 TINY_CLAW_WORKSPACE=/srv/tiny-claw/workspace
 ```
 
-`TINY_CLAW_WORKSPACE` is optional for Feishu mode. If it is unset, the gateway
-creates and uses `.feishu-workspace` under the directory where the process is
-started. Set it explicitly when the bot should operate on a real project
-directory instead of the default local workspace.
+`TINY_CLAW_WORKSPACE` is optional for Feishu mode. It is the root directory for
+Feishu-triggered workspaces. If it is unset, the gateway creates and uses
+`.feishu-workspace` under the directory where the process is started. Each
+Feishu chat gets an isolated workspace under this root, such as
+`.feishu-workspace/feishu/chat-oc_abc123`.
 
 Use `.env.feishu` for Feishu and nginx-facing settings. Start from the checked-in
 template:
@@ -111,8 +112,9 @@ Run it from the repository root so it can read `.env` and `.env.feishu`:
 ```
 
 The process launch directory is only the configuration/deployment directory.
-The agent workspace is `TINY_CLAW_WORKSPACE` when configured, otherwise
-`./.feishu-workspace`.
+The Feishu workspace root is `TINY_CLAW_WORKSPACE` when configured, otherwise
+`./.feishu-workspace`. A message from a chat runs inside that chat's own
+subdirectory below the root.
 
 ## Logging
 

@@ -14,8 +14,10 @@ use axum::{Json, Router};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::fs;
+use std::io;
 use std::panic::AssertUnwindSafe;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer};
@@ -136,7 +138,7 @@ async fn handle_event(
             }
 
             let client = state.client.clone();
-            let work_dir = state.work_dir.clone();
+            let workspace_root = state.work_dir.clone();
             let sessions = Arc::clone(&state.sessions);
             let approvals = Arc::clone(&state.approvals);
             tokio::task::spawn_blocking(move || {
@@ -145,6 +147,13 @@ async fn handle_event(
 
                 let run_result = std::panic::catch_unwind(AssertUnwindSafe(
                     || -> Result<(), Box<dyn std::error::Error>> {
+                        let work_dir = chat_work_dir(&workspace_root, &chat_id)?;
+                        info!(
+                            %message_id,
+                            %chat_id,
+                            work_dir = %work_dir.display(),
+                            "Feishu chat workspace resolved"
+                        );
                         let mut engine = build_feishu_engine(
                             &work_dir,
                             client.clone(),
@@ -242,6 +251,34 @@ async fn handle_event(
     }
 }
 
+fn chat_work_dir(workspace_root: &Path, chat_id: &str) -> io::Result<PathBuf> {
+    let work_dir = workspace_root
+        .join("feishu")
+        .join(chat_id_path_segment(chat_id));
+    fs::create_dir_all(&work_dir)?;
+    work_dir.canonicalize()
+}
+
+fn chat_id_path_segment(chat_id: &str) -> String {
+    if chat_id.is_empty() {
+        return "chat-empty".to_string();
+    }
+
+    let mut segment = String::from("chat-");
+    for byte in chat_id.bytes() {
+        match byte {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' => {
+                segment.push(byte as char);
+            }
+            _ => {
+                segment.push('_');
+                segment.push_str(&format!("{byte:02x}"));
+            }
+        }
+    }
+    segment
+}
+
 #[derive(Debug, Serialize)]
 struct ErrorResponse {
     error: String,
@@ -310,5 +347,28 @@ mod tests {
         assert!(!deduper.already_seen_or_insert("om_1"));
         assert!(deduper.already_seen_or_insert("om_1"));
         assert!(!deduper.already_seen_or_insert("om_2"));
+    }
+
+    #[test]
+    fn chat_work_dir_is_nested_under_workspace_root() {
+        let workspace_root = tempfile::tempdir().unwrap();
+
+        let work_dir = chat_work_dir(workspace_root.path(), "oc_abc123").unwrap();
+
+        assert_eq!(
+            work_dir,
+            workspace_root
+                .path()
+                .join("feishu")
+                .join("chat-oc_abc123")
+                .canonicalize()
+                .unwrap()
+        );
+        assert!(work_dir.is_dir());
+    }
+
+    #[test]
+    fn chat_id_path_segment_escapes_path_separators() {
+        assert_eq!(chat_id_path_segment("../oc/abc"), "chat-_2e_2e_2foc_2fabc");
     }
 }
