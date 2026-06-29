@@ -23,6 +23,7 @@ pub enum ToolAccessMode {
 #[derive(Default)]
 pub struct ToolRegistry {
     tools: HashMap<&'static str, Arc<dyn Tool>>,
+    middlewares: Vec<Arc<dyn ToolMiddleware>>,
 }
 
 impl ToolRegistry {
@@ -41,6 +42,13 @@ impl ToolRegistry {
 
         self.tools.insert(name, Arc::new(tool));
         Ok(())
+    }
+
+    pub fn use_middleware<M>(&mut self, middleware: M)
+    where
+        M: ToolMiddleware + 'static,
+    {
+        self.middlewares.push(Arc::new(middleware));
     }
 
     pub fn len(&self) -> usize {
@@ -74,6 +82,12 @@ impl ToolRegistry {
             );
         };
 
+        for middleware in &self.middlewares {
+            if let Some(result) = middleware.before_execute(call) {
+                return result;
+            }
+        }
+
         tool.execute(call)
     }
 
@@ -81,6 +95,19 @@ impl ToolRegistry {
         self.tools
             .get(call.name.as_str())
             .is_some_and(|tool| tool.access_mode(call) == ToolAccessMode::ReadOnly)
+    }
+}
+
+pub trait ToolMiddleware: Send + Sync {
+    fn before_execute(&self, call: &ToolCall) -> Option<ToolResult>;
+}
+
+impl<F> ToolMiddleware for F
+where
+    F: Fn(&ToolCall) -> Option<ToolResult> + Send + Sync,
+{
+    fn before_execute(&self, call: &ToolCall) -> Option<ToolResult> {
+        self(call)
     }
 }
 
@@ -159,5 +186,32 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(names, vec!["read_file", "test"]);
+    }
+
+    #[test]
+    fn middleware_can_reject_before_tool_execution() {
+        let mut registry = ToolRegistry::new();
+        registry.register(TestTool).unwrap();
+        registry.use_middleware(|call: &ToolCall| {
+            Some(ToolResult::error(call.id.clone(), "blocked by middleware"))
+        });
+
+        let result = registry.execute(&ToolCall::new("call_1", "test", serde_json::json!({})));
+
+        assert!(result.is_error);
+        assert_eq!(result.output, "blocked by middleware");
+    }
+
+    #[test]
+    fn middleware_is_not_called_for_unknown_tools() {
+        let mut registry = ToolRegistry::new();
+        registry.use_middleware(|call: &ToolCall| {
+            Some(ToolResult::error(call.id.clone(), "blocked by middleware"))
+        });
+
+        let result = registry.execute(&ToolCall::new("call_1", "missing", serde_json::json!({})));
+
+        assert!(result.is_error);
+        assert_eq!(result.output, "tool 'missing' is not registered");
     }
 }

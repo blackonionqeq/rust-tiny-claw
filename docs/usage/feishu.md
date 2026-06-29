@@ -15,7 +15,9 @@ nginx :443
 
 Feishu sends message events to the public HTTPS URL. nginx terminates HTTPS and
 proxies the callback to the Rust process. The Rust process parses the event,
-runs the agent engine, then sends text replies through Feishu OpenAPI.
+runs the agent engine, then sends replies through Feishu OpenAPI. If a tool call
+matches the Feishu approval policy, the gateway sends an interactive approval
+card and waits for a human decision before the tool executes.
 
 The current callback path is:
 
@@ -187,8 +189,49 @@ In the Feishu developer console:
 - Configure the same verification token as `FEISHU_VERIFY_TOKEN`.
 - Subscribe to the text message receive event, currently
   `im.message.receive_v1`.
+- Subscribe to the card action callback event used by interactive message card
+  buttons.
 - Grant the app permission to send messages as the bot.
 - Publish or activate the app version after changing permissions or events.
+
+## Approval Card Smoke Test
+
+Use this flow to verify the real Feishu approval path with a human click. It is
+manual by design because it depends on a public callback URL, Feishu app
+permissions, real provider credentials, and a reviewer in the Feishu client.
+
+1. Start the Feishu gateway from the repository root:
+
+```bash
+cargo run --features feishu --bin tiny-claw-feishu
+```
+
+2. Send a prompt to the bot that forces a dangerous command:
+
+```text
+Use bash to run rm -r target as your next action. Do not choose a safer command.
+```
+
+3. Confirm the bot sends an approval card with:
+
+- Tool name.
+- Matched policy reason.
+- Argument preview.
+- One optional rejection reason input.
+- `Allow` and `Reject` buttons.
+
+4. Click `Reject`, entering a reason such as:
+
+```text
+Use ls and a dry-run before deleting files.
+```
+
+5. Confirm the agent receives that exact rejection text in its tool observation
+and continues from the human feedback.
+
+6. If the same card is still clickable from another Feishu client, such as a
+mobile device, click the opposite decision. The server should report that the
+approval was already handled, and the original agent result must not change.
 
 ## Current Limits
 
@@ -201,12 +244,14 @@ The current gateway supports:
 - In-process per-chat sessions with provider request context compaction.
 - Tenant access token retrieval and caching.
 - Plain text replies to the originating chat.
+- Interactive approval cards for Feishu-gateway tool calls classified as `ask`.
+- One-shot approval resolution so duplicate desktop/mobile card clicks cannot
+  overwrite the first result.
 
 It does not yet support:
 
 - Encrypted callback bodies.
 - WebSocket or long-connection event mode.
-- Rich cards or approval cards.
 - Persistent event deduplication across process restarts.
 - Workspace-level task queue or locking.
 - Persistent per-chat sessions across process restarts.

@@ -28,6 +28,15 @@ when the process restarts.
 - Keep engine-level read-only tool parallelism separate from Feishu request
   concurrency.
 
+## Permissions
+
+- Later: move tool approval rules into a runtime-editable configuration file so
+  deployments can change command behavior without rebuilding the binary.
+- Keep the current `allow` / `ask` / `deny` policy shape, but load the rule
+  source from configuration once the built-in defaults become limiting.
+- Consider safe reload semantics so an in-flight approval keeps the policy that
+  created it while new tool calls see the updated rules.
+
 ## Cancellation
 
 - Add a Feishu command shape for cancelling queued or running work, such as

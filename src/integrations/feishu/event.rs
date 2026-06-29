@@ -1,3 +1,4 @@
+use crate::integrations::feishu::approval::ApprovalDecision;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -22,7 +23,16 @@ pub enum FeishuCallback {
     Challenge { challenge: String },
     Message(IncomingMessage),
     UnsupportedMessage(UnsupportedMessage),
+    CardAction(CardAction),
     Ignored,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CardAction {
+    pub approval_id: String,
+    pub decision: ApprovalDecision,
+    pub operator_id: Option<String>,
+    pub reject_reason: Option<String>,
 }
 
 pub fn parse_callback(
@@ -42,6 +52,10 @@ pub fn parse_callback(
 
     verify_callback_token(body, verify_token)?;
 
+    if let Some(card_action) = parse_card_action(body)? {
+        return Ok(FeishuCallback::CardAction(card_action));
+    }
+
     let header_event_type = body
         .pointer("/header/event_type")
         .and_then(Value::as_str)
@@ -51,6 +65,57 @@ pub fn parse_callback(
     }
 
     parse_message(body)
+}
+
+fn parse_card_action(body: &Value) -> Result<Option<CardAction>, EventError> {
+    let Some(action) = body
+        .get("action")
+        .or_else(|| body.pointer("/event/action"))
+        .or_else(|| body.pointer("/schema/action"))
+    else {
+        return Ok(None);
+    };
+
+    let value = action
+        .get("value")
+        .ok_or_else(|| EventError::new("missing Feishu card action value"))?;
+    let action_name = value
+        .get("action")
+        .and_then(Value::as_str)
+        .ok_or_else(|| EventError::new("missing Feishu card action name"))?;
+
+    let decision = match action_name {
+        "approve_tool_call" => ApprovalDecision::Approve,
+        "reject_tool_call" => ApprovalDecision::Reject,
+        _ => return Ok(None),
+    };
+
+    let approval_id = value
+        .get("approval_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| EventError::new("missing Feishu approval_id"))?
+        .to_string();
+    let operator_id = body
+        .get("open_id")
+        .or_else(|| body.pointer("/operator/open_id"))
+        .or_else(|| body.pointer("/event/operator/open_id"))
+        .or_else(|| body.pointer("/event/operator/operator_id/open_id"))
+        .or_else(|| body.pointer("/event/operator/operator_id/user_id"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+    let reject_reason = action
+        .get("form_value")
+        .or_else(|| action.get("formValue"))
+        .and_then(|form_value| form_value.get("reject_reason"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+
+    Ok(Some(CardAction {
+        approval_id,
+        decision,
+        operator_id,
+        reject_reason,
+    }))
 }
 
 fn verify_callback_token(body: &Value, verify_token: Option<&str>) -> Result<(), EventError> {
@@ -227,5 +292,63 @@ mod tests {
         assert_eq!(unsupported.message_id, "om_1");
         assert_eq!(unsupported.sender_id, "ou_1");
         assert_eq!(unsupported.message_type, "image");
+    }
+
+    #[test]
+    fn parses_top_level_card_action() {
+        let body = json!({
+            "token": "verify",
+            "open_id": "ou_1",
+            "action": {
+                "value": {
+                    "action": "reject_tool_call",
+                    "approval_id": "approval_1"
+                },
+                "form_value": {
+                    "reject_reason": "use dry-run first"
+                }
+            }
+        });
+
+        let action = match parse_callback(&body, Some("verify")).unwrap() {
+            FeishuCallback::CardAction(action) => action,
+            other => panic!("unexpected callback: {other:?}"),
+        };
+
+        assert_eq!(action.approval_id, "approval_1");
+        assert_eq!(action.decision, ApprovalDecision::Reject);
+        assert_eq!(action.operator_id.as_deref(), Some("ou_1"));
+        assert_eq!(action.reject_reason.as_deref(), Some("use dry-run first"));
+    }
+
+    #[test]
+    fn parses_event_wrapped_card_action() {
+        let body = json!({
+            "header": {
+                "event_type": "card.action.trigger",
+                "token": "verify"
+            },
+            "event": {
+                "operator": {
+                    "operator_id": { "open_id": "ou_1" }
+                },
+                "action": {
+                    "value": {
+                        "action": "approve_tool_call",
+                        "approval_id": "approval_1"
+                    }
+                }
+            }
+        });
+
+        let action = match parse_callback(&body, Some("verify")).unwrap() {
+            FeishuCallback::CardAction(action) => action,
+            other => panic!("unexpected callback: {other:?}"),
+        };
+
+        assert_eq!(action.approval_id, "approval_1");
+        assert_eq!(action.decision, ApprovalDecision::Approve);
+        assert_eq!(action.operator_id.as_deref(), Some("ou_1"));
+        assert_eq!(action.reject_reason, None);
     }
 }

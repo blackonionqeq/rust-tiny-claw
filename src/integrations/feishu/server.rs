@@ -1,6 +1,7 @@
-use crate::app::build_engine;
+use crate::app::build_feishu_engine;
 use crate::context_engine::ContextBudget;
 use crate::engine::RunOptions;
+use crate::integrations::feishu::approval::{ApprovalManager, callback_response};
 use crate::integrations::feishu::client::FeishuClient;
 use crate::integrations::feishu::config::FeishuConfig;
 use crate::integrations::feishu::event::{FeishuCallback, parse_callback};
@@ -31,6 +32,7 @@ pub struct FeishuServerState {
     work_dir: PathBuf,
     deduper: Arc<MessageDeduper>,
     sessions: Arc<SessionManager>,
+    approvals: Arc<ApprovalManager>,
 }
 
 impl FeishuServerState {
@@ -41,6 +43,7 @@ impl FeishuServerState {
             work_dir,
             deduper: Arc::new(MessageDeduper::new(MESSAGE_DEDUP_TTL)),
             sessions: Arc::new(SessionManager::new()),
+            approvals: Arc::new(ApprovalManager::new()),
         }
     }
 
@@ -85,6 +88,35 @@ async fn handle_event(
             info!(%event_type, "Feishu event ignored");
             Ok(Json(json!({ "ok": true })))
         }
+        Ok(FeishuCallback::CardAction(action)) => {
+            let approval_id = action.approval_id.clone();
+            let decision = action.decision;
+            let operator_id = action
+                .operator_id
+                .clone()
+                .unwrap_or_else(|| "<unknown>".to_string());
+            info!(
+                %approval_id,
+                %operator_id,
+                ?decision,
+                "Feishu approval card action received"
+            );
+
+            let outcome = state
+                .approvals
+                .resolve(&approval_id, decision, action.reject_reason)
+                .map_err(|error| {
+                    warn!(%approval_id, error = %error, "Feishu approval resolution failed");
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ErrorResponse {
+                            error: error.to_string(),
+                        }),
+                    )
+                })?;
+
+            Ok(Json(callback_response(outcome)))
+        }
         Ok(FeishuCallback::Message(message)) => {
             let message_id = message.message_id.clone();
             let chat_id = message.chat_id.clone();
@@ -106,13 +138,19 @@ async fn handle_event(
             let client = state.client.clone();
             let work_dir = state.work_dir.clone();
             let sessions = Arc::clone(&state.sessions);
+            let approvals = Arc::clone(&state.approvals);
             tokio::task::spawn_blocking(move || {
                 let started = Instant::now();
                 info!(%message_id, %chat_id, "Feishu agent run started");
 
                 let run_result = std::panic::catch_unwind(AssertUnwindSafe(
                     || -> Result<(), Box<dyn std::error::Error>> {
-                        let mut engine = build_engine(&work_dir)?;
+                        let mut engine = build_feishu_engine(
+                            &work_dir,
+                            client.clone(),
+                            chat_id.clone(),
+                            approvals,
+                        )?;
                         let mut reporter = FeishuReporter::new(client, message.chat_id);
                         let session =
                             sessions.get_or_create(format!("feishu:{chat_id}"), work_dir.clone());

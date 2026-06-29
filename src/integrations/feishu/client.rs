@@ -21,11 +21,33 @@ impl FeishuClient {
     }
 
     pub fn send_text_to_chat(&self, chat_id: &str, text: &str) -> Result<(), ClientError> {
-        let text_len = text.chars().count();
-        let token = self.token_cache.tenant_access_token()?;
         let content = serde_json::to_string(&TextContent { text }).map_err(|error| {
             ClientError::new(format!("failed to encode Feishu message content: {error}"))
         })?;
+
+        self.send_message_to_chat(chat_id, "text", content)
+    }
+
+    pub fn send_interactive_card_to_chat(
+        &self,
+        chat_id: &str,
+        card: &serde_json::Value,
+    ) -> Result<(), ClientError> {
+        let content = serde_json::to_string(card).map_err(|error| {
+            ClientError::new(format!("failed to encode Feishu card content: {error}"))
+        })?;
+
+        self.send_message_to_chat(chat_id, "interactive", content)
+    }
+
+    fn send_message_to_chat(
+        &self,
+        chat_id: &str,
+        msg_type: &'static str,
+        content: String,
+    ) -> Result<(), ClientError> {
+        let content_len = content.chars().count();
+        let token = self.token_cache.tenant_access_token()?;
 
         let response = self
             .client
@@ -34,7 +56,7 @@ impl FeishuClient {
             .bearer_auth(token)
             .json(&SendMessageRequest {
                 receive_id: chat_id,
-                msg_type: "text",
+                msg_type,
                 content,
             })
             .send()
@@ -50,7 +72,8 @@ impl FeishuClient {
         if !status.is_success() {
             warn!(
                 %chat_id,
-                text_len,
+                %msg_type,
+                content_len,
                 %status,
                 "Feishu send message HTTP request failed"
             );
@@ -68,7 +91,8 @@ impl FeishuClient {
         if response.code != 0 {
             warn!(
                 %chat_id,
-                text_len,
+                %msg_type,
+                content_len,
                 code = response.code,
                 msg = %response.msg,
                 "Feishu send message API returned an error"
@@ -79,7 +103,7 @@ impl FeishuClient {
             )));
         }
 
-        debug!(%chat_id, text_len, "Feishu text message sent");
+        debug!(%chat_id, %msg_type, content_len, "Feishu message sent");
         Ok(())
     }
 }

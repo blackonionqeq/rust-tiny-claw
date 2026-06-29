@@ -1,13 +1,21 @@
 use crate::context_engine::ContextManager;
 use crate::engine::AgentEngine;
+#[cfg(feature = "feishu")]
+use crate::integrations::feishu::approval::ApprovalManager;
+#[cfg(feature = "feishu")]
+use crate::integrations::feishu::client::FeishuClient;
 use crate::memory::FileMemory;
 use crate::provider::{ClaudeCompatibleProvider, MockProvider, OpenAiCompatibleProvider, Provider};
 use crate::telemetry::Telemetry;
 use crate::tools::{
     BashTool, EditFileTool, GrepTool, LoadSkillTool, ReadFileTool, ToolRegistry, WriteFileTool,
 };
+#[cfg(feature = "feishu")]
+use crate::tools::{PermissionDecision, RuleBasedToolPolicy, ToolPolicy};
 use std::env;
 use std::path::Path;
+#[cfg(feature = "feishu")]
+use std::sync::Arc;
 
 pub fn build_engine(
     work_dir: &Path,
@@ -15,14 +23,7 @@ pub fn build_engine(
     let work_dir = work_dir.canonicalize()?;
     let provider = build_provider()?;
     let active_skills = active_skills_from_env();
-
-    let mut registry = ToolRegistry::new();
-    registry.register(ReadFileTool::new(&work_dir)?)?;
-    registry.register(LoadSkillTool::new(&work_dir, active_skills.clone())?)?;
-    registry.register(WriteFileTool::new(&work_dir)?)?;
-    registry.register(BashTool::new(&work_dir)?)?;
-    registry.register(EditFileTool::new(&work_dir)?)?;
-    registry.register(GrepTool::new(&work_dir)?)?;
+    let registry = build_registry(&work_dir, active_skills.clone())?;
 
     Ok(AgentEngine::new(
         provider,
@@ -31,6 +32,65 @@ pub fn build_engine(
         FileMemory::new(work_dir.join(".tiny-claw")),
         Telemetry::default(),
     ))
+}
+
+#[cfg(feature = "feishu")]
+pub fn build_feishu_engine(
+    work_dir: &Path,
+    client: FeishuClient,
+    chat_id: String,
+    approval_manager: Arc<ApprovalManager>,
+) -> Result<AgentEngine<Box<dyn Provider>>, Box<dyn std::error::Error>> {
+    let work_dir = work_dir.canonicalize()?;
+    let provider = build_provider()?;
+    let active_skills = active_skills_from_env();
+    let mut registry = build_registry(&work_dir, active_skills.clone())?;
+    let policy = Arc::new(RuleBasedToolPolicy::default());
+
+    registry.use_middleware(
+        move |call: &crate::schema::ToolCall| match policy.decide(call) {
+            PermissionDecision::Allow => None,
+            PermissionDecision::Deny { reason } => Some(crate::schema::ToolResult::error(
+                call.id.clone(),
+                format!("Tool call denied by policy: {reason}"),
+            )),
+            PermissionDecision::Ask { reason } => {
+                match approval_manager.wait_for_tool_approval(&client, &chat_id, call, &reason) {
+                    Ok(resolution) if resolution.allowed => None,
+                    Ok(resolution) => Some(crate::schema::ToolResult::error(
+                        call.id.clone(),
+                        resolution.reason,
+                    )),
+                    Err(error) => Some(crate::schema::ToolResult::error(
+                        call.id.clone(),
+                        format!("Tool call requires approval, but approval failed: {error}"),
+                    )),
+                }
+            }
+        },
+    );
+
+    Ok(AgentEngine::new(
+        provider,
+        registry,
+        ContextManager::new(&work_dir, active_skills),
+        FileMemory::new(work_dir.join(".tiny-claw")),
+        Telemetry::default(),
+    ))
+}
+
+fn build_registry(
+    work_dir: &Path,
+    active_skills: Vec<String>,
+) -> Result<ToolRegistry, Box<dyn std::error::Error>> {
+    let mut registry = ToolRegistry::new();
+    registry.register(ReadFileTool::new(work_dir)?)?;
+    registry.register(LoadSkillTool::new(work_dir, active_skills)?)?;
+    registry.register(WriteFileTool::new(work_dir)?)?;
+    registry.register(BashTool::new(work_dir)?)?;
+    registry.register(EditFileTool::new(work_dir)?)?;
+    registry.register(GrepTool::new(work_dir)?)?;
+    Ok(registry)
 }
 
 pub fn stream_enabled() -> Result<bool, Box<dyn std::error::Error>> {
