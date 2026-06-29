@@ -309,15 +309,15 @@ fn truncate_chars(value: &str, max_chars: usize) -> String {
 }
 
 pub fn callback_response(outcome: ResolveOutcome) -> Value {
-    let content = match outcome {
-        ResolveOutcome::Resolved => "Approval recorded.",
-        ResolveOutcome::AlreadyHandled => "This approval has already been handled.",
-        ResolveOutcome::Unknown => "Approval request was not found or has expired.",
+    let (toast_type, content) = match outcome {
+        ResolveOutcome::Resolved => ("success", "Approval recorded."),
+        ResolveOutcome::AlreadyHandled => ("warning", "This approval has already been handled."),
+        ResolveOutcome::Unknown => ("warning", "Approval request was not found or has expired."),
     };
 
     json!({
         "toast": {
-            "type": "info",
+            "type": toast_type,
             "content": content
         }
     })
@@ -371,6 +371,23 @@ mod tests {
         assert!(!content.contains("```"));
         assert!(content.contains("&lt;code&gt;"));
         assert!(content.contains("\"command\""));
+    }
+
+    #[test]
+    fn callback_response_uses_success_toast_for_resolved_approval() {
+        let response = super::callback_response(ResolveOutcome::Resolved);
+
+        assert_eq!(response["toast"]["type"], "success");
+        assert_eq!(response["toast"]["content"], "Approval recorded.");
+    }
+
+    #[test]
+    fn callback_response_uses_warning_toast_for_non_resolved_approval() {
+        let already_handled = super::callback_response(ResolveOutcome::AlreadyHandled);
+        let unknown = super::callback_response(ResolveOutcome::Unknown);
+
+        assert_eq!(already_handled["toast"]["type"], "warning");
+        assert_eq!(unknown["toast"]["type"], "warning");
     }
 
     #[test]
