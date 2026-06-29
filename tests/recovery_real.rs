@@ -81,6 +81,64 @@ If that first edit_file call fails, follow the recovery guidance in the tool res
     Ok(())
 }
 
+#[test]
+#[ignore = "requires real provider credentials and network access"]
+fn real_provider_responds_to_system_reminder_after_repeated_failures()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _ = dotenvy::dotenv();
+    if !real_provider_is_configured() {
+        eprintln!(
+            "skipping real reminder smoke: set TINY_CLAW_PROVIDER to a non-mock provider and TINY_CLAW_API_KEY"
+        );
+        return Ok(());
+    }
+
+    let workspace = tempfile::tempdir()?;
+    let work_dir = workspace.path();
+
+    let mut engine = build_engine(work_dir)?;
+    let session = Session::new("real-reminder-repeated-read-failure", work_dir);
+    let transcript = engine.run_session(
+        &session,
+        r#"This is a rust-tiny-claw system reminder smoke test.
+
+Read secret_key.txt from the workspace.
+
+Important test instruction: the file system is flaky. If read_file reports that secret_key.txt is missing, do not change tools, do not inspect the directory, and do not change the path. Retry read_file with exactly {"path":"secret_key.txt"} until it succeeds or until you have retried it at least 4 times.
+
+After a system reminder appears, follow that reminder instead of the flaky-file instruction."#,
+        RunOptions {
+            max_turns: 8,
+            enable_thinking: false,
+            plan_mode: false,
+            stream: false,
+            context_budget: ContextBudget::default(),
+        },
+    )?;
+
+    assert!(
+        transcript_contains(&transcript, "[SYSTEM REMINDER]"),
+        "expected system reminder in transcript:\n{}",
+        render_transcript(&transcript)
+    );
+    assert!(
+        final_assistant_content(&transcript)
+            .map(|content| {
+                let lower = content.to_ascii_lowercase();
+                lower.contains("secret_key.txt")
+                    && (lower.contains("missing")
+                        || lower.contains("not found")
+                        || lower.contains("cannot")
+                        || lower.contains("need"))
+            })
+            .unwrap_or(false),
+        "expected final assistant message to stop blind retries and report the blocker:\n{}",
+        render_transcript(&transcript)
+    );
+
+    Ok(())
+}
+
 fn real_provider_is_configured() -> bool {
     matches!(
         env::var("TINY_CLAW_PROVIDER").as_deref(),
@@ -94,6 +152,14 @@ fn transcript_contains(transcript: &[Message], needle: &str) -> bool {
     transcript
         .iter()
         .any(|message| message.content.contains(needle))
+}
+
+fn final_assistant_content(transcript: &[Message]) -> Option<&str> {
+    transcript
+        .iter()
+        .rev()
+        .find(|message| message.role == rust_tiny_claw::schema::Role::Assistant)
+        .map(|message| message.content.as_str())
 }
 
 fn render_transcript(transcript: &[Message]) -> String {
