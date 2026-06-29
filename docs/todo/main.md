@@ -30,6 +30,11 @@
 
 ## Context And Memory
 
+- Later: evolve automatic Plan Mode from the current local heuristic into a
+  richer decider. Keep explicit `--plan` as an override, but consider a
+  model-backed preflight classifier for language-agnostic task complexity,
+  structured reasons, and confidence thresholds before injecting the Plan Mode
+  prompt.
 - Later: add persistent session storage behind the current in-memory `Session`
   and `SessionManager` APIs. Prefer a small `SessionStore` abstraction with a
   file-backed JSONL implementation so `append_many` can durably append messages

@@ -50,10 +50,11 @@ The shorter `-C` form is also supported:
 wsl -d Ubuntu -- bash -lc "cargo run --bin tiny-claw -- -C /mnt/d/codes/other-project 'List the active project rules.'"
 ```
 
-For longer work that should survive context compaction or process restarts, add
-`--plan` before the prompt. In Plan Mode, the system prompt instructs the model
-to inspect or create `PLAN.md` and `TODO.md`, then keep the checklist updated as
-it completes work:
+Plan Mode defaults to `auto`: the CLI enables it for likely long-running tasks
+or when the workspace already contains `PLAN.md` or `TODO.md`. In Plan Mode, the
+system prompt instructs the model to inspect or create those files, then keep
+the checklist updated as it completes work. Add `--plan` or `--plan-mode on` to
+force it on:
 
 ```powershell
 wsl -d Ubuntu -- bash -lc "cargo run --bin tiny-claw -- --plan -C /mnt/d/codes/other-project 'Continue the web server implementation.'"
