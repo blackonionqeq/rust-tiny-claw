@@ -219,9 +219,17 @@ fn to_openai_message(message: &Message) -> Result<OpenAiMessage, ProviderError> 
             .collect()
     });
 
+    // Some strict OpenAI-compatible endpoints require assistant tool-call
+    // messages to include `content: ""` instead of omitting the field.
+    let content = if message.content.is_empty() {
+        (message.role == Role::Assistant && !message.tool_calls.is_empty()).then(String::new)
+    } else {
+        Some(message.content.clone())
+    };
+
     Ok(OpenAiMessage {
         role,
-        content: (!message.content.is_empty()).then(|| message.content.clone()),
+        content,
         tool_call_id: None,
         tool_calls,
     })
@@ -510,6 +518,23 @@ mod tests {
         let tools = request.tools.unwrap();
         assert_eq!(tools[0].tool_type, "function");
         assert_eq!(tools[0].function.name, "echo");
+    }
+
+    #[test]
+    fn request_keeps_empty_assistant_content_when_tool_calls_are_present() {
+        let request = build_request(
+            "deepseek-v4-flash",
+            &[Message::assistant_with_tools(
+                "",
+                vec![ToolCall::new("call_1", "echo", json!({ "text": "hi" }))],
+            )],
+            Some(&[]),
+        )
+        .unwrap();
+
+        assert_eq!(request.messages[0].role, "assistant");
+        assert_eq!(request.messages[0].content.as_deref(), Some(""));
+        assert!(request.messages[0].tool_calls.is_some());
     }
 
     #[test]

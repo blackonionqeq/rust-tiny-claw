@@ -277,6 +277,7 @@ fn run_uses_context_manager_system_prompt() {
             super::RunOptions {
                 max_turns: 1,
                 enable_thinking: false,
+                plan_mode: false,
                 stream: false,
                 context_budget: ContextBudget::default(),
             },
@@ -295,6 +296,42 @@ fn run_uses_context_manager_system_prompt() {
     assert!(messages[0].content.contains("# Available Skills"));
     assert!(messages[0].content.contains("id: rust"));
     assert!(!messages[0].content.contains("Prefer cargo."));
+}
+
+#[test]
+fn run_includes_plan_mode_in_system_prompt_when_enabled() {
+    let work_dir = unique_temp_dir();
+    fs::create_dir_all(&work_dir).unwrap();
+
+    let seen_messages = Arc::new(Mutex::new(None));
+    let mut engine = AgentEngine::new(
+        CapturingProvider::new(Arc::clone(&seen_messages)),
+        ToolRegistry::new(),
+        ContextManager::new(&work_dir, Vec::new()),
+        FileMemory::new(&work_dir),
+        Telemetry::default(),
+    );
+
+    engine
+        .run_with_options(
+            "continue the task",
+            super::RunOptions {
+                max_turns: 1,
+                enable_thinking: false,
+                plan_mode: true,
+                stream: false,
+                context_budget: ContextBudget::default(),
+            },
+        )
+        .unwrap();
+
+    fs::remove_dir_all(&work_dir).unwrap();
+
+    let messages = seen_messages.lock().unwrap().clone().unwrap();
+    assert_eq!(messages[0].role, Role::System);
+    assert!(messages[0].content.contains("# Plan Mode"));
+    assert!(messages[0].content.contains("PLAN.md"));
+    assert!(messages[0].content.contains("TODO.md"));
 }
 
 #[test]
@@ -323,6 +360,7 @@ fn run_session_sends_full_history_to_provider_when_under_budget() {
             super::RunOptions {
                 max_turns: 1,
                 enable_thinking: false,
+                plan_mode: false,
                 stream: false,
                 context_budget: ContextBudget::default(),
             },
@@ -376,6 +414,7 @@ fn run_session_compacts_provider_context_without_mutating_session_history() {
             super::RunOptions {
                 max_turns: 1,
                 enable_thinking: false,
+                plan_mode: false,
                 stream: false,
                 context_budget: ContextBudget {
                     max_chars: 80,
@@ -441,6 +480,7 @@ fn run_session_keeps_provider_context_isolated_by_session() {
     let options = super::RunOptions {
         max_turns: 1,
         enable_thinking: false,
+        plan_mode: false,
         stream: false,
         context_budget: ContextBudget::default(),
     };

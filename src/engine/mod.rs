@@ -44,6 +44,7 @@ where
             format!("provider: {}", self.provider.name()),
             format!("streaming: {}", options.stream),
             format!("thinking phase: {}", options.enable_thinking),
+            format!("plan mode: {}", options.plan_mode),
             format!("tools registered: {}", self.registry.len()),
             format!("context manager: {}", self.context.name()),
             format!("workspace: {}", self.context.work_dir().display()),
@@ -108,7 +109,9 @@ where
             // The session owns the full transcript. Provider calls receive a
             // temporary compacted copy so long-lived sessions keep their original
             // history while model requests stay within the configured budget.
-            let mut messages = vec![Message::system(self.context.build_system_prompt()?)];
+            let mut messages = vec![Message::system(
+                self.context.build_system_prompt(options.plan_mode)?,
+            )];
             messages.extend(session.history());
             let mut messages = ContextCompactor::new(options.context_budget).compact(&messages);
 
@@ -165,7 +168,7 @@ where
 
             if tool_calls.is_empty() {
                 reporter.on_complete()?;
-                return Ok(self.session_transcript(session)?);
+                return Ok(self.session_transcript(session, options.plan_mode)?);
             }
 
             reporter.on_tool_calls(&tool_calls)?;
@@ -253,8 +256,14 @@ where
             .all(|tool_call| self.registry.is_read_only_call(tool_call))
     }
 
-    fn session_transcript(&self, session: &Session) -> Result<Vec<Message>, EngineError> {
-        let mut transcript = vec![Message::system(self.context.build_system_prompt()?)];
+    fn session_transcript(
+        &self,
+        session: &Session,
+        plan_mode: bool,
+    ) -> Result<Vec<Message>, EngineError> {
+        let mut transcript = vec![Message::system(
+            self.context.build_system_prompt(plan_mode)?,
+        )];
         transcript.extend(session.history());
         Ok(transcript)
     }
@@ -270,6 +279,7 @@ fn execute_one_tool(registry: &ToolRegistry, tool_call: &ToolCall) -> ToolResult
 pub struct RunOptions {
     pub max_turns: usize,
     pub enable_thinking: bool,
+    pub plan_mode: bool,
     pub stream: bool,
     pub context_budget: ContextBudget,
 }
@@ -279,6 +289,7 @@ impl Default for RunOptions {
         Self {
             max_turns: 16,
             enable_thinking: false,
+            plan_mode: false,
             stream: true,
             context_budget: ContextBudget::default(),
         }

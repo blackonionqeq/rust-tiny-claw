@@ -119,6 +119,7 @@ async fn handle_event(
                         let options = RunOptions {
                             max_turns: 12,
                             enable_thinking: false,
+                            plan_mode: false,
                             stream: false,
                             context_budget: ContextBudget::default(),
                         };

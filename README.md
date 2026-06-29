@@ -4,7 +4,9 @@ Rust learning project for building an Agent Harness lesson by lesson.
 
 Current chapter state: the harness can run a two-stage ReAct loop, call local
 workspace tools, execute same-turn tool batches in parallel, and keep bounded
-provider request contexts over full per-session history. It supports the built-in mock provider plus
+provider request contexts over full per-session history. For long-running tasks,
+Plan Mode can prompt the model to externalize task state into workspace
+`PLAN.md` and `TODO.md` files. It supports the built-in mock provider plus
 OpenAI/Claude-compatible HTTP providers.
 
 ## Run
@@ -46,6 +48,15 @@ The shorter `-C` form is also supported:
 
 ```powershell
 wsl -d Ubuntu -- bash -lc "cargo run --bin tiny-claw -- -C /mnt/d/codes/other-project 'List the active project rules.'"
+```
+
+For longer work that should survive context compaction or process restarts, add
+`--plan` before the prompt. In Plan Mode, the system prompt instructs the model
+to inspect or create `PLAN.md` and `TODO.md`, then keep the checklist updated as
+it completes work:
+
+```powershell
+wsl -d Ubuntu -- bash -lc "cargo run --bin tiny-claw -- --plan -C /mnt/d/codes/other-project 'Continue the web server implementation.'"
 ```
 
 You can also pipe stdin:

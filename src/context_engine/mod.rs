@@ -13,6 +13,22 @@ pub use skills::{SkillDocument, SkillManifest, load_model_invokable_skill};
 const BASE_INSTRUCTIONS: &str =
     "You are rust-tiny-claw, a small coding assistant running inside one workspace.";
 
+// Plan Mode is prompt-only state externalization: the engine stays stateless
+// about task plans and lets the model maintain PLAN.md/TODO.md through tools.
+const PLAN_MODE_INSTRUCTIONS: &str = r#"# Plan Mode
+
+Plan Mode is enabled for this run. Treat this as a long-running task that may outlive the current process and context window.
+
+Use workspace files as externalized task state:
+
+1. At the start of the task, inspect the workspace root for `PLAN.md` and `TODO.md`.
+2. If they do not exist, create `PLAN.md` with the overall goal, constraints, and approach, then create `TODO.md` with concrete Markdown checklist items.
+3. If they already exist, do not overwrite them. Read both files, use `PLAN.md` for the current strategy, and continue from the first unchecked `- [ ]` item in `TODO.md`.
+4. After completing a checklist item, immediately update `TODO.md` from `- [ ]` to `- [x]` for that item before moving on.
+5. If you lose track of the task or hit an error, reread `TODO.md` and continue from the next unchecked item.
+
+Keep `PLAN.md` and `TODO.md` concise and useful for human review. Simple one-off requests do not need extra files unless Plan Mode is enabled."#;
+
 #[derive(Debug, Clone)]
 pub struct ContextManager {
     work_dir: PathBuf,
@@ -35,8 +51,12 @@ impl ContextManager {
         &self.work_dir
     }
 
-    pub fn build_system_prompt(&self) -> Result<String, ContextError> {
+    pub fn build_system_prompt(&self, plan_mode: bool) -> Result<String, ContextError> {
         let mut sections = vec![format!("# Base Instructions\n\n{BASE_INSTRUCTIONS}")];
+
+        if plan_mode {
+            sections.push(PLAN_MODE_INSTRUCTIONS.to_string());
+        }
 
         if let Some(workspace_instructions) = self.load_workspace_instructions()? {
             sections.push(format!(
@@ -152,7 +172,7 @@ mod tests {
         fs::create_dir_all(&work_dir).unwrap();
 
         let prompt = ContextManager::new(&work_dir, Vec::new())
-            .build_system_prompt()
+            .build_system_prompt(false)
             .unwrap();
 
         fs::remove_dir_all(&work_dir).unwrap();
@@ -170,7 +190,7 @@ mod tests {
         fs::write(work_dir.join("AGENTS.md"), "Use project conventions.\n").unwrap();
 
         let prompt = ContextManager::new(&work_dir, Vec::new())
-            .build_system_prompt()
+            .build_system_prompt(false)
             .unwrap();
 
         fs::remove_dir_all(&work_dir).unwrap();
@@ -190,7 +210,7 @@ mod tests {
         write_skill(&work_dir, "git", "# Git Skill\n");
 
         let prompt = ContextManager::new(&work_dir, vec!["git".to_string(), "rust".to_string()])
-            .build_system_prompt()
+            .build_system_prompt(false)
             .unwrap();
 
         fs::remove_dir_all(&work_dir).unwrap();
@@ -217,7 +237,7 @@ mod tests {
         );
 
         let prompt = ContextManager::new(&work_dir, vec!["secret".to_string()])
-            .build_system_prompt()
+            .build_system_prompt(false)
             .unwrap();
 
         fs::remove_dir_all(&work_dir).unwrap();
@@ -226,6 +246,24 @@ mod tests {
         assert!(!prompt.contains("secret"));
         assert!(!prompt.contains("Hidden workflow"));
         assert!(!prompt.contains("# Secret Skill"));
+    }
+
+    #[test]
+    fn plan_mode_adds_externalized_state_instructions() {
+        let work_dir = unique_temp_dir();
+        fs::create_dir_all(&work_dir).unwrap();
+
+        let prompt = ContextManager::new(&work_dir, Vec::new())
+            .build_system_prompt(true)
+            .unwrap();
+
+        fs::remove_dir_all(&work_dir).unwrap();
+
+        assert!(prompt.contains("# Plan Mode"));
+        assert!(prompt.contains("PLAN.md"));
+        assert!(prompt.contains("TODO.md"));
+        assert!(prompt.contains("- [ ]"));
+        assert!(prompt.contains("- [x]"));
     }
 
     fn write_skill(work_dir: &Path, skill_id: &str, content: &str) {

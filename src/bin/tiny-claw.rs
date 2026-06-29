@@ -22,6 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let options = RunOptions {
         max_turns: 12,
         enable_thinking: false,
+        plan_mode: cli_input.plan_mode,
         stream: stream_enabled()?,
         context_budget: ContextBudget::default(),
     };
@@ -39,6 +40,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CliInput {
     work_dir: PathBuf,
+    plan_mode: bool,
     prompt: String,
 }
 
@@ -64,11 +66,15 @@ fn parse_cli_input(
     default_work_dir: PathBuf,
 ) -> Result<CliInput, String> {
     let mut work_dir = default_work_dir;
+    let mut plan_mode = false;
     let mut prompt_parts = Vec::new();
     let mut index = 0;
 
     while index < args.len() {
         match args[index].as_str() {
+            "--plan" | "--plan-mode" => {
+                plan_mode = true;
+            }
             "--workspace" | "-C" => {
                 index += 1;
                 let Some(path) = args.get(index) else {
@@ -95,7 +101,11 @@ fn parse_cli_input(
         SMOKE_PROMPT.to_string()
     };
 
-    Ok(CliInput { work_dir, prompt })
+    Ok(CliInput {
+        work_dir,
+        plan_mode,
+        prompt,
+    })
 }
 
 #[cfg(test)]
@@ -112,6 +122,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(input.work_dir, PathBuf::from("/default"));
+        assert!(!input.plan_mode);
         assert_eq!(input.prompt, "inspect skills");
     }
 
@@ -125,6 +136,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(input.prompt, "use rust skill");
+        assert!(!input.plan_mode);
     }
 
     #[test]
@@ -132,6 +144,7 @@ mod tests {
         let input = parse_cli_input(Vec::new(), None, PathBuf::from("/default")).unwrap();
 
         assert_eq!(input.prompt, SMOKE_PROMPT);
+        assert!(!input.plan_mode);
     }
 
     #[test]
@@ -148,6 +161,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(input.work_dir, PathBuf::from("/tmp/project"));
+        assert!(!input.plan_mode);
         assert_eq!(input.prompt, "inspect");
     }
 
@@ -165,6 +179,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(input.work_dir, PathBuf::from("/tmp/project"));
+        assert!(!input.plan_mode);
         assert_eq!(input.prompt, "inspect");
     }
 
@@ -178,5 +193,42 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error, "--workspace requires a path");
+    }
+
+    #[test]
+    fn plan_flag_enables_plan_mode_without_becoming_prompt() {
+        let input = parse_cli_input(
+            vec![
+                "--plan".to_string(),
+                "build".to_string(),
+                "feature".to_string(),
+            ],
+            None,
+            PathBuf::from("/default"),
+        )
+        .unwrap();
+
+        assert_eq!(input.work_dir, PathBuf::from("/default"));
+        assert!(input.plan_mode);
+        assert_eq!(input.prompt, "build feature");
+    }
+
+    #[test]
+    fn plan_mode_flag_enables_plan_mode_without_becoming_prompt() {
+        let input = parse_cli_input(
+            vec![
+                "--plan-mode".to_string(),
+                "-C".to_string(),
+                "/tmp/project".to_string(),
+                "continue".to_string(),
+            ],
+            None,
+            PathBuf::from("/default"),
+        )
+        .unwrap();
+
+        assert_eq!(input.work_dir, PathBuf::from("/tmp/project"));
+        assert!(input.plan_mode);
+        assert_eq!(input.prompt, "continue");
     }
 }
