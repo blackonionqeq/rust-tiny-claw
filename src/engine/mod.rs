@@ -1,4 +1,6 @@
-use crate::context_engine::{ContextBudget, ContextCompactor, ContextError, ContextManager};
+use crate::context_engine::{
+    ContextBudget, ContextCompactor, ContextError, ContextManager, RecoveryManager,
+};
 use crate::memory::{FileMemory, Session};
 use crate::provider::{Provider, ProviderError, StdoutStreamSink};
 use crate::reporter::terminal::TerminalReporter;
@@ -272,7 +274,14 @@ where
 fn execute_one_tool(registry: &ToolRegistry, tool_call: &ToolCall) -> ToolResult {
     // Act and observe: the engine only dispatches the call. Tool-specific
     // argument parsing and execution stay inside the tool layer.
-    registry.execute(tool_call)
+    let mut result = registry.execute(tool_call);
+    if result.is_error {
+        // Only true tool errors get recovery wrapping here. Command failures
+        // such as `bash` non-zero exits remain normal observations so the model
+        // can self-correct from the command output without changing error flow.
+        result.output = RecoveryManager::new().render_tool_error(&tool_call.name, &result.output);
+    }
+    result
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

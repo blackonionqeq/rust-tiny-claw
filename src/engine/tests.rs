@@ -185,6 +185,29 @@ impl Tool for RecordingTool {
     }
 }
 
+struct ErrorTool;
+
+impl Tool for ErrorTool {
+    fn name(&self) -> &'static str {
+        "edit_file"
+    }
+
+    fn description(&self) -> &'static str {
+        "Test-only failing edit tool."
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {}
+        })
+    }
+
+    fn execute(&self, call: &ToolCall) -> ToolResult {
+        ToolResult::error(call.id.clone(), "old_text was not found in the file")
+    }
+}
+
 #[test]
 fn parallel_tool_batch_preserves_call_order() {
     let work_dir = unique_temp_dir();
@@ -247,6 +270,46 @@ fn mutating_tool_batch_runs_sequentially() {
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].output, "");
     assert_eq!(results[1].output, "first");
+}
+
+#[test]
+fn tool_errors_are_enhanced_with_recovery_guidance() {
+    let work_dir = unique_temp_dir();
+    fs::create_dir_all(&work_dir).unwrap();
+
+    let mut registry = ToolRegistry::new();
+    registry.register(ErrorTool).unwrap();
+
+    let engine = AgentEngine::new(
+        NoopProvider,
+        registry,
+        ContextManager::default(),
+        FileMemory::new(&work_dir),
+        Telemetry::default(),
+    );
+    let results = engine.execute_tool_batch(&[ToolCall::new(
+        "call_1",
+        "edit_file",
+        json!({ "path": "src/main.rs" }),
+    )]);
+
+    fs::remove_dir_all(&work_dir).unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert!(results[0].is_error);
+    assert_eq!(results[0].tool_call_id, "call_1");
+    assert!(results[0].output.contains("Tool call failed."));
+    assert!(
+        results[0]
+            .output
+            .contains("error_code: EDIT_TEXT_NOT_FOUND")
+    );
+    assert!(
+        results[0]
+            .output
+            .contains("old_text was not found in the file")
+    );
+    assert!(results[0].output.contains("Read the target file again"));
 }
 
 #[test]

@@ -33,6 +33,9 @@ The desired architecture is a small, explicit Harness runtime:
   for design details. Do not inject full skill bodies into the initial prompt;
   use the model-visible catalog plus `load_skill` flow unless a later lesson
   explicitly changes that architecture.
+- When searching for a document explicitly named or pointed to by the user, use
+  `rg -u` so ignored local course/material directories such as `1274/` are not
+  skipped.
 
 ## Git And Commit Style
 
