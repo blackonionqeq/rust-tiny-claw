@@ -68,7 +68,7 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use tempfile::tempdir;
 
     #[test]
     fn on_setting_always_enables_plan_mode() {
@@ -77,13 +77,10 @@ mod tests {
 
     #[test]
     fn auto_setting_enables_for_existing_plan_files() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
-        fs::write(work_dir.join("TODO.md"), "- [ ] Continue\n").unwrap();
+        let work_dir = tempdir().unwrap();
+        fs::write(work_dir.path().join("TODO.md"), "- [ ] Continue\n").unwrap();
 
-        let enabled = PlanModeSetting::Auto.resolve("List files", &work_dir);
-
-        fs::remove_dir_all(&work_dir).unwrap();
+        let enabled = PlanModeSetting::Auto.resolve("List files", work_dir.path());
 
         assert!(enabled);
     }
@@ -104,13 +101,5 @@ mod tests {
     fn auto_setting_stays_light_for_simple_prompt() {
         assert!(!PlanModeSetting::Auto.resolve("List files", &PathBuf::from("/missing"),));
         assert!(!PlanModeSetting::Auto.resolve("解释这个函数", &PathBuf::from("/missing"),));
-    }
-
-    fn unique_temp_dir() -> PathBuf {
-        let suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("rust-tiny-claw-plan-mode-test-{suffix}"))
     }
 }

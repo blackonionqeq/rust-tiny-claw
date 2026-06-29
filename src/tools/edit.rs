@@ -313,7 +313,7 @@ mod tests {
     use crate::tools::Tool;
     use serde_json::json;
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use tempfile::tempdir;
 
     #[test]
     fn fuzzy_replace_uses_exact_match_first() {
@@ -369,15 +369,15 @@ mod tests {
 
     #[test]
     fn edit_file_edits_workspace_file() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(work_dir.join("src")).unwrap();
+        let work_dir = tempdir().unwrap();
+        fs::create_dir_all(work_dir.path().join("src")).unwrap();
         fs::write(
-            work_dir.join("src/main.rs"),
+            work_dir.path().join("src/main.rs"),
             "fn main() {\n    println!(\"old\");\n}\n",
         )
         .unwrap();
 
-        let tool = EditFileTool::new(&work_dir).unwrap();
+        let tool = EditFileTool::new(work_dir.path()).unwrap();
         let result = tool.execute(&ToolCall::new(
             "call_1",
             "edit_file",
@@ -387,8 +387,7 @@ mod tests {
                 "new_text": "println!(\"new\");"
             }),
         ));
-        let edited = fs::read_to_string(work_dir.join("src/main.rs")).unwrap();
-        fs::remove_dir_all(&work_dir).unwrap();
+        let edited = fs::read_to_string(work_dir.path().join("src/main.rs")).unwrap();
 
         assert!(!result.is_error);
         assert_eq!(edited, "fn main() {\n    println!(\"new\");\n}\n");
@@ -396,10 +395,9 @@ mod tests {
 
     #[test]
     fn edit_file_rejects_parent_directory_escape() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
+        let work_dir = tempdir().unwrap();
 
-        let tool = EditFileTool::new(&work_dir).unwrap();
+        let tool = EditFileTool::new(work_dir.path()).unwrap();
         let result = tool.execute(&ToolCall::new(
             "call_1",
             "edit_file",
@@ -410,8 +408,6 @@ mod tests {
             }),
         ));
 
-        fs::remove_dir_all(&work_dir).unwrap();
-
         assert!(result.is_error);
         assert!(
             result.output.contains("outside the workspace")
@@ -421,27 +417,16 @@ mod tests {
 
     #[test]
     fn edit_file_rejects_missing_arguments() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
+        let work_dir = tempdir().unwrap();
 
-        let tool = EditFileTool::new(&work_dir).unwrap();
+        let tool = EditFileTool::new(work_dir.path()).unwrap();
         let result = tool.execute(&ToolCall::new(
             "call_1",
             "edit_file",
             json!({ "path": "file.txt", "old_text": "old" }),
         ));
 
-        fs::remove_dir_all(&work_dir).unwrap();
-
         assert!(result.is_error);
         assert!(result.output.contains("new_text"));
-    }
-
-    fn unique_temp_dir() -> std::path::PathBuf {
-        let suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("rust-tiny-claw-edit-test-{suffix}"))
     }
 }

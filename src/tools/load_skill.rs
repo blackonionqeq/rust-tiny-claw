@@ -98,25 +98,23 @@ mod tests {
     use serde_json::json;
     use std::fs;
     use std::path::Path;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use tempfile::tempdir;
 
     #[test]
     fn load_skill_returns_enabled_model_invokable_body() {
-        let work_dir = unique_temp_dir();
+        let work_dir = tempdir().unwrap();
         write_skill(
-            &work_dir,
+            work_dir.path(),
             "rust",
             "---\nname: Rust\ndescription: Prefer Cargo.\n---\n\n# Rust Skill\nPrefer cargo.\n",
         );
 
-        let tool = LoadSkillTool::new(&work_dir, vec!["rust".to_string()]).unwrap();
+        let tool = LoadSkillTool::new(work_dir.path(), vec!["rust".to_string()]).unwrap();
         let result = tool.execute(&ToolCall::new(
             "call_1",
             "load_skill",
             json!({ "skill_id": "rust" }),
         ));
-
-        fs::remove_dir_all(&work_dir).unwrap();
 
         assert!(!result.is_error);
         assert!(result.output.contains("skill: rust"));
@@ -126,21 +124,19 @@ mod tests {
 
     #[test]
     fn load_skill_rejects_hidden_skill() {
-        let work_dir = unique_temp_dir();
+        let work_dir = tempdir().unwrap();
         write_skill(
-            &work_dir,
+            work_dir.path(),
             "secret",
             "---\ndisable-model-invocation: true\n---\n\n# Secret Skill\n",
         );
 
-        let tool = LoadSkillTool::new(&work_dir, vec!["secret".to_string()]).unwrap();
+        let tool = LoadSkillTool::new(work_dir.path(), vec!["secret".to_string()]).unwrap();
         let result = tool.execute(&ToolCall::new(
             "call_1",
             "load_skill",
             json!({ "skill_id": "secret" }),
         ));
-
-        fs::remove_dir_all(&work_dir).unwrap();
 
         assert!(result.is_error);
         assert!(result.output.contains("disabled for model invocation"));
@@ -148,17 +144,15 @@ mod tests {
 
     #[test]
     fn load_skill_rejects_unenabled_skill() {
-        let work_dir = unique_temp_dir();
-        write_skill(&work_dir, "rust", "# Rust Skill\n");
+        let work_dir = tempdir().unwrap();
+        write_skill(work_dir.path(), "rust", "# Rust Skill\n");
 
-        let tool = LoadSkillTool::new(&work_dir, Vec::new()).unwrap();
+        let tool = LoadSkillTool::new(work_dir.path(), Vec::new()).unwrap();
         let result = tool.execute(&ToolCall::new(
             "call_1",
             "load_skill",
             json!({ "skill_id": "rust" }),
         ));
-
-        fs::remove_dir_all(&work_dir).unwrap();
 
         assert!(result.is_error);
         assert!(result.output.contains("not enabled"));
@@ -166,10 +160,10 @@ mod tests {
 
     #[test]
     fn load_skill_is_idempotent() {
-        let work_dir = unique_temp_dir();
-        write_skill(&work_dir, "rust", "# Rust Skill\n");
+        let work_dir = tempdir().unwrap();
+        write_skill(work_dir.path(), "rust", "# Rust Skill\n");
 
-        let tool = LoadSkillTool::new(&work_dir, vec!["rust".to_string()]).unwrap();
+        let tool = LoadSkillTool::new(work_dir.path(), vec!["rust".to_string()]).unwrap();
         let first = tool.execute(&ToolCall::new(
             "call_1",
             "load_skill",
@@ -180,8 +174,6 @@ mod tests {
             "load_skill",
             json!({ "skill_id": "rust" }),
         ));
-
-        fs::remove_dir_all(&work_dir).unwrap();
 
         assert!(!first.is_error);
         assert!(!second.is_error);
@@ -194,13 +186,5 @@ mod tests {
         let skill_dir = work_dir.join(".tiny-claw").join("skills").join(skill_id);
         fs::create_dir_all(&skill_dir).unwrap();
         fs::write(skill_dir.join("SKILL.md"), content).unwrap();
-    }
-
-    fn unique_temp_dir() -> std::path::PathBuf {
-        let suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("rust-tiny-claw-load-skill-test-{suffix}"))
     }
 }

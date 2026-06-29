@@ -8,7 +8,8 @@ use crate::tools::{Tool, ToolAccessMode, ToolRegistry};
 use serde_json::json;
 use std::fs;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+use tempfile::tempdir;
 
 struct NoopProvider;
 
@@ -210,8 +211,7 @@ impl Tool for ErrorTool {
 
 #[test]
 fn parallel_tool_batch_preserves_call_order() {
-    let work_dir = unique_temp_dir();
-    fs::create_dir_all(&work_dir).unwrap();
+    let work_dir = tempdir().unwrap();
 
     let mut registry = ToolRegistry::new();
     registry.register(DelayTool).unwrap();
@@ -220,7 +220,7 @@ fn parallel_tool_batch_preserves_call_order() {
         NoopProvider,
         registry,
         ContextManager::default(),
-        FileMemory::new(&work_dir),
+        FileMemory::new(work_dir.path()),
         Telemetry::default(),
     );
     let results = engine.execute_tool_batch(&[
@@ -236,8 +236,6 @@ fn parallel_tool_batch_preserves_call_order() {
         ),
     ]);
 
-    fs::remove_dir_all(&work_dir).unwrap();
-
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].tool_call_id, "call_1");
     assert_eq!(results[0].output, "slow");
@@ -247,8 +245,7 @@ fn parallel_tool_batch_preserves_call_order() {
 
 #[test]
 fn mutating_tool_batch_runs_sequentially() {
-    let work_dir = unique_temp_dir();
-    fs::create_dir_all(&work_dir).unwrap();
+    let work_dir = tempdir().unwrap();
 
     let mut registry = ToolRegistry::new();
     registry.register(RecordingTool::new()).unwrap();
@@ -257,15 +254,13 @@ fn mutating_tool_batch_runs_sequentially() {
         NoopProvider,
         registry,
         ContextManager::default(),
-        FileMemory::new(&work_dir),
+        FileMemory::new(work_dir.path()),
         Telemetry::default(),
     );
     let results = engine.execute_tool_batch(&[
         ToolCall::new("call_1", "record", json!({ "label": "first" })),
         ToolCall::new("call_2", "record", json!({ "label": "second" })),
     ]);
-
-    fs::remove_dir_all(&work_dir).unwrap();
 
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].output, "");
@@ -274,8 +269,7 @@ fn mutating_tool_batch_runs_sequentially() {
 
 #[test]
 fn tool_errors_are_enhanced_with_recovery_guidance() {
-    let work_dir = unique_temp_dir();
-    fs::create_dir_all(&work_dir).unwrap();
+    let work_dir = tempdir().unwrap();
 
     let mut registry = ToolRegistry::new();
     registry.register(ErrorTool).unwrap();
@@ -284,7 +278,7 @@ fn tool_errors_are_enhanced_with_recovery_guidance() {
         NoopProvider,
         registry,
         ContextManager::default(),
-        FileMemory::new(&work_dir),
+        FileMemory::new(work_dir.path()),
         Telemetry::default(),
     );
     let results = engine.execute_tool_batch(&[ToolCall::new(
@@ -292,8 +286,6 @@ fn tool_errors_are_enhanced_with_recovery_guidance() {
         "edit_file",
         json!({ "path": "src/main.rs" }),
     )]);
-
-    fs::remove_dir_all(&work_dir).unwrap();
 
     assert_eq!(results.len(), 1);
     assert!(results[0].is_error);
@@ -314,14 +306,17 @@ fn tool_errors_are_enhanced_with_recovery_guidance() {
 
 #[test]
 fn run_uses_context_manager_system_prompt() {
-    let work_dir = unique_temp_dir();
-    fs::create_dir_all(&work_dir).unwrap();
+    let work_dir = tempdir().unwrap();
     fs::write(
-        work_dir.join("AGENTS.md"),
+        work_dir.path().join("AGENTS.md"),
         "Follow workspace instructions.\n",
     )
     .unwrap();
-    let skill_dir = work_dir.join(".tiny-claw").join("skills").join("rust");
+    let skill_dir = work_dir
+        .path()
+        .join(".tiny-claw")
+        .join("skills")
+        .join("rust");
     fs::create_dir_all(&skill_dir).unwrap();
     fs::write(skill_dir.join("SKILL.md"), "# Rust Skill\nPrefer cargo.\n").unwrap();
 
@@ -329,8 +324,8 @@ fn run_uses_context_manager_system_prompt() {
     let mut engine = AgentEngine::new(
         CapturingProvider::new(Arc::clone(&seen_messages)),
         ToolRegistry::new(),
-        ContextManager::new(&work_dir, vec!["rust".to_string()]),
-        FileMemory::new(&work_dir),
+        ContextManager::new(work_dir.path(), vec!["rust".to_string()]),
+        FileMemory::new(work_dir.path()),
         Telemetry::default(),
     );
 
@@ -347,8 +342,6 @@ fn run_uses_context_manager_system_prompt() {
         )
         .unwrap();
 
-    fs::remove_dir_all(&work_dir).unwrap();
-
     let messages = seen_messages.lock().unwrap().clone().unwrap();
     assert_eq!(messages[0].role, Role::System);
     assert!(
@@ -363,15 +356,14 @@ fn run_uses_context_manager_system_prompt() {
 
 #[test]
 fn run_includes_plan_mode_in_system_prompt_when_enabled() {
-    let work_dir = unique_temp_dir();
-    fs::create_dir_all(&work_dir).unwrap();
+    let work_dir = tempdir().unwrap();
 
     let seen_messages = Arc::new(Mutex::new(None));
     let mut engine = AgentEngine::new(
         CapturingProvider::new(Arc::clone(&seen_messages)),
         ToolRegistry::new(),
-        ContextManager::new(&work_dir, Vec::new()),
-        FileMemory::new(&work_dir),
+        ContextManager::new(work_dir.path(), Vec::new()),
+        FileMemory::new(work_dir.path()),
         Telemetry::default(),
     );
 
@@ -388,8 +380,6 @@ fn run_includes_plan_mode_in_system_prompt_when_enabled() {
         )
         .unwrap();
 
-    fs::remove_dir_all(&work_dir).unwrap();
-
     let messages = seen_messages.lock().unwrap().clone().unwrap();
     assert_eq!(messages[0].role, Role::System);
     assert!(messages[0].content.contains("# Plan Mode"));
@@ -399,18 +389,17 @@ fn run_includes_plan_mode_in_system_prompt_when_enabled() {
 
 #[test]
 fn run_session_sends_full_history_to_provider_when_under_budget() {
-    let work_dir = unique_temp_dir();
-    fs::create_dir_all(&work_dir).unwrap();
+    let work_dir = tempdir().unwrap();
 
     let seen_messages = Arc::new(Mutex::new(None));
     let mut engine = AgentEngine::new(
         CapturingProvider::new(Arc::clone(&seen_messages)),
         ToolRegistry::new(),
-        ContextManager::new(&work_dir, Vec::new()),
-        FileMemory::new(&work_dir),
+        ContextManager::new(work_dir.path(), Vec::new()),
+        FileMemory::new(work_dir.path()),
         Telemetry::default(),
     );
-    let session = Session::new("chat_1", &work_dir);
+    let session = Session::new("chat_1", work_dir.path());
     session.append_many([
         Message::user("old user message"),
         Message::assistant("recent assistant message"),
@@ -431,8 +420,6 @@ fn run_session_sends_full_history_to_provider_when_under_budget() {
         )
         .unwrap();
 
-    fs::remove_dir_all(&work_dir).unwrap();
-
     let messages = seen_messages.lock().unwrap().clone().unwrap();
     assert_eq!(messages.len(), 4);
     assert_eq!(messages[0].role, Role::System);
@@ -443,18 +430,17 @@ fn run_session_sends_full_history_to_provider_when_under_budget() {
 
 #[test]
 fn run_session_compacts_provider_context_without_mutating_session_history() {
-    let work_dir = unique_temp_dir();
-    fs::create_dir_all(&work_dir).unwrap();
+    let work_dir = tempdir().unwrap();
 
     let seen_messages = Arc::new(Mutex::new(None));
     let mut engine = AgentEngine::new(
         CapturingProvider::new(Arc::clone(&seen_messages)),
         ToolRegistry::new(),
-        ContextManager::new(&work_dir, Vec::new()),
-        FileMemory::new(&work_dir),
+        ContextManager::new(work_dir.path(), Vec::new()),
+        FileMemory::new(work_dir.path()),
         Telemetry::default(),
     );
-    let session = Session::new("chat_1", &work_dir);
+    let session = Session::new("chat_1", work_dir.path());
     let long_output = "0123456789".repeat(30);
     session.append_many([
         Message::user("please read the log"),
@@ -493,8 +479,6 @@ fn run_session_compacts_provider_context_without_mutating_session_history() {
         )
         .unwrap();
 
-    fs::remove_dir_all(&work_dir).unwrap();
-
     let messages = seen_messages.lock().unwrap().clone().unwrap();
     let compacted_observation = messages
         .iter()
@@ -527,19 +511,18 @@ fn run_session_compacts_provider_context_without_mutating_session_history() {
 
 #[test]
 fn run_session_keeps_provider_context_isolated_by_session() {
-    let work_dir = unique_temp_dir();
-    fs::create_dir_all(&work_dir).unwrap();
+    let work_dir = tempdir().unwrap();
 
     let calls = Arc::new(Mutex::new(Vec::new()));
     let mut engine = AgentEngine::new(
         RecordingProvider::new(Arc::clone(&calls)),
         ToolRegistry::new(),
-        ContextManager::new(&work_dir, Vec::new()),
-        FileMemory::new(&work_dir),
+        ContextManager::new(work_dir.path(), Vec::new()),
+        FileMemory::new(work_dir.path()),
         Telemetry::default(),
     );
-    let front = Session::new("front", &work_dir);
-    let back = Session::new("back", &work_dir);
+    let front = Session::new("front", work_dir.path());
+    let back = Session::new("back", work_dir.path());
     let options = super::RunOptions {
         max_turns: 1,
         enable_thinking: false,
@@ -573,8 +556,6 @@ fn run_session_keeps_provider_context_isolated_by_session() {
         )
         .unwrap();
 
-    fs::remove_dir_all(&work_dir).unwrap();
-
     let calls = calls.lock().unwrap();
     assert_eq!(calls.len(), 3);
     assert_context_contains(&calls[0], "front first request");
@@ -598,12 +579,4 @@ fn assert_context_excludes(messages: &[Message], content: &str) {
         messages.iter().all(|message| message.content != content),
         "expected provider context to exclude {content:?}, got {messages:?}"
     );
-}
-
-fn unique_temp_dir() -> std::path::PathBuf {
-    let suffix = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    std::env::temp_dir().join(format!("rust-tiny-claw-engine-test-{suffix}"))
 }

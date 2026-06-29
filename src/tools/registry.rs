@@ -106,8 +106,7 @@ mod tests {
     use super::{Tool, ToolRegistry};
     use crate::schema::{ToolCall, ToolResult};
     use crate::tools::ReadFileTool;
-    use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use tempfile::tempdir;
 
     #[derive(Debug, Default)]
     struct TestTool;
@@ -145,12 +144,11 @@ mod tests {
 
     #[test]
     fn registry_returns_definitions_in_stable_name_order() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
+        let work_dir = tempdir().unwrap();
 
         let mut registry = ToolRegistry::new();
         registry
-            .register(ReadFileTool::new(&work_dir).unwrap())
+            .register(ReadFileTool::new(work_dir.path()).unwrap())
             .unwrap();
         registry.register(TestTool).unwrap();
 
@@ -160,16 +158,6 @@ mod tests {
             .map(|definition| definition.name)
             .collect::<Vec<_>>();
 
-        fs::remove_dir_all(&work_dir).unwrap();
-
         assert_eq!(names, vec!["read_file", "test"]);
-    }
-
-    fn unique_temp_dir() -> std::path::PathBuf {
-        let suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("rust-tiny-claw-test-{suffix}"))
     }
 }

@@ -115,22 +115,20 @@ mod tests {
     use crate::tools::Tool;
     use serde_json::json;
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use tempfile::tempdir;
 
     #[test]
     fn write_file_creates_parent_directories_and_writes_content() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
+        let work_dir = tempdir().unwrap();
 
-        let tool = WriteFileTool::new(&work_dir).unwrap();
+        let tool = WriteFileTool::new(work_dir.path()).unwrap();
         let result = tool.execute(&ToolCall::new(
             "call_1",
             "write_file",
             json!({ "path": "src/generated.txt", "content": "hello\n" }),
         ));
 
-        let written = fs::read_to_string(work_dir.join("src/generated.txt")).unwrap();
-        fs::remove_dir_all(&work_dir).unwrap();
+        let written = fs::read_to_string(work_dir.path().join("src/generated.txt")).unwrap();
 
         assert!(!result.is_error);
         assert_eq!(written, "hello\n");
@@ -138,17 +136,14 @@ mod tests {
 
     #[test]
     fn write_file_rejects_parent_directory_escape() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
+        let work_dir = tempdir().unwrap();
 
-        let tool = WriteFileTool::new(&work_dir).unwrap();
+        let tool = WriteFileTool::new(work_dir.path()).unwrap();
         let result = tool.execute(&ToolCall::new(
             "call_1",
             "write_file",
             json!({ "path": "../outside.txt", "content": "nope" }),
         ));
-
-        fs::remove_dir_all(&work_dir).unwrap();
 
         assert!(result.is_error);
         assert!(result.output.contains("must not contain '..'"));
@@ -156,28 +151,17 @@ mod tests {
 
     #[test]
     fn write_file_rejects_absolute_paths() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
-        let absolute_path = work_dir.join("file.txt");
+        let work_dir = tempdir().unwrap();
+        let absolute_path = work_dir.path().join("file.txt");
 
-        let tool = WriteFileTool::new(&work_dir).unwrap();
+        let tool = WriteFileTool::new(work_dir.path()).unwrap();
         let result = tool.execute(&ToolCall::new(
             "call_1",
             "write_file",
             json!({ "path": absolute_path, "content": "nope" }),
         ));
 
-        fs::remove_dir_all(&work_dir).unwrap();
-
         assert!(result.is_error);
         assert!(result.output.contains("relative"));
-    }
-
-    fn unique_temp_dir() -> std::path::PathBuf {
-        let suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("rust-tiny-claw-test-{suffix}"))
     }
 }

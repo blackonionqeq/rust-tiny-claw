@@ -199,22 +199,19 @@ mod tests {
     use serde_json::json;
     use std::fs;
     use std::time::Duration;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use tempfile::tempdir;
 
     #[test]
     fn bash_runs_command_in_workspace() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
-        fs::write(work_dir.join("hello.txt"), "hello").unwrap();
+        let work_dir = tempdir().unwrap();
+        fs::write(work_dir.path().join("hello.txt"), "hello").unwrap();
 
-        let tool = BashTool::new(&work_dir).unwrap();
+        let tool = BashTool::new(work_dir.path()).unwrap();
         let result = tool.execute(&ToolCall::new(
             "call_1",
             "bash",
             json!({ "command": "cat hello.txt" }),
         ));
-
-        fs::remove_dir_all(&work_dir).unwrap();
 
         assert!(!result.is_error);
         assert_eq!(result.output, "hello");
@@ -222,17 +219,14 @@ mod tests {
 
     #[test]
     fn bash_returns_non_zero_status_as_observation() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
+        let work_dir = tempdir().unwrap();
 
-        let tool = BashTool::new(&work_dir).unwrap();
+        let tool = BashTool::new(work_dir.path()).unwrap();
         let result = tool.execute(&ToolCall::new(
             "call_1",
             "bash",
             json!({ "command": "echo problem >&2; exit 7" }),
         ));
-
-        fs::remove_dir_all(&work_dir).unwrap();
 
         assert!(!result.is_error);
         assert!(result.output.contains("command exited with status"));
@@ -241,28 +235,17 @@ mod tests {
 
     #[test]
     fn bash_truncates_long_output() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
+        let work_dir = tempdir().unwrap();
 
-        let tool = BashTool::with_limits(&work_dir, Duration::from_secs(30), 10).unwrap();
+        let tool = BashTool::with_limits(work_dir.path(), Duration::from_secs(30), 10).unwrap();
         let result = tool.execute(&ToolCall::new(
             "call_1",
             "bash",
             json!({ "command": "printf abcdefghijklmnopqrstuvwxyz" }),
         ));
 
-        fs::remove_dir_all(&work_dir).unwrap();
-
         assert!(!result.is_error);
         assert!(result.output.starts_with("abcdefghij"));
         assert!(result.output.contains("truncated"));
-    }
-
-    fn unique_temp_dir() -> std::path::PathBuf {
-        let suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("rust-tiny-claw-test-{suffix}"))
     }
 }

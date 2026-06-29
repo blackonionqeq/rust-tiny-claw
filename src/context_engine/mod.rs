@@ -166,18 +166,15 @@ impl std::error::Error for ContextError {
 mod tests {
     use super::*;
     use std::path::Path;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use tempfile::tempdir;
 
     #[test]
     fn base_prompt_renders_without_workspace_or_skills() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
+        let work_dir = tempdir().unwrap();
 
-        let prompt = ContextManager::new(&work_dir, Vec::new())
+        let prompt = ContextManager::new(work_dir.path(), Vec::new())
             .build_system_prompt(false)
             .unwrap();
-
-        fs::remove_dir_all(&work_dir).unwrap();
 
         assert!(prompt.contains("# Base Instructions"));
         assert!(prompt.contains(BASE_INSTRUCTIONS));
@@ -187,15 +184,16 @@ mod tests {
 
     #[test]
     fn agents_md_content_appears_in_workspace_section() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
-        fs::write(work_dir.join("AGENTS.md"), "Use project conventions.\n").unwrap();
+        let work_dir = tempdir().unwrap();
+        fs::write(
+            work_dir.path().join("AGENTS.md"),
+            "Use project conventions.\n",
+        )
+        .unwrap();
 
-        let prompt = ContextManager::new(&work_dir, Vec::new())
+        let prompt = ContextManager::new(work_dir.path(), Vec::new())
             .build_system_prompt(false)
             .unwrap();
-
-        fs::remove_dir_all(&work_dir).unwrap();
 
         assert!(prompt.contains("# Workspace Instructions"));
         assert!(prompt.contains("Use project conventions."));
@@ -203,19 +201,18 @@ mod tests {
 
     #[test]
     fn active_skills_render_catalog_in_requested_order() {
-        let work_dir = unique_temp_dir();
+        let work_dir = tempdir().unwrap();
         write_skill(
-            &work_dir,
+            work_dir.path(),
             "rust",
             "---\nname: Rust\ndescription: Rust workflows\n---\n\n# Rust Skill\n",
         );
-        write_skill(&work_dir, "git", "# Git Skill\n");
+        write_skill(work_dir.path(), "git", "# Git Skill\n");
 
-        let prompt = ContextManager::new(&work_dir, vec!["git".to_string(), "rust".to_string()])
-            .build_system_prompt(false)
-            .unwrap();
-
-        fs::remove_dir_all(&work_dir).unwrap();
+        let prompt =
+            ContextManager::new(work_dir.path(), vec!["git".to_string(), "rust".to_string()])
+                .build_system_prompt(false)
+                .unwrap();
 
         let git_index = prompt.find("id: git").unwrap();
         let rust_index = prompt.find("id: rust").unwrap();
@@ -231,18 +228,16 @@ mod tests {
 
     #[test]
     fn hidden_active_skill_is_not_rendered_in_catalog() {
-        let work_dir = unique_temp_dir();
+        let work_dir = tempdir().unwrap();
         write_skill(
-            &work_dir,
+            work_dir.path(),
             "secret",
             "---\nname: Secret\ndescription: Hidden workflow\ndisable-model-invocation: true\n---\n\n# Secret Skill\n",
         );
 
-        let prompt = ContextManager::new(&work_dir, vec!["secret".to_string()])
+        let prompt = ContextManager::new(work_dir.path(), vec!["secret".to_string()])
             .build_system_prompt(false)
             .unwrap();
-
-        fs::remove_dir_all(&work_dir).unwrap();
 
         assert!(!prompt.contains("# Available Skills"));
         assert!(!prompt.contains("secret"));
@@ -252,14 +247,11 @@ mod tests {
 
     #[test]
     fn plan_mode_adds_externalized_state_instructions() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
+        let work_dir = tempdir().unwrap();
 
-        let prompt = ContextManager::new(&work_dir, Vec::new())
+        let prompt = ContextManager::new(work_dir.path(), Vec::new())
             .build_system_prompt(true)
             .unwrap();
-
-        fs::remove_dir_all(&work_dir).unwrap();
 
         assert!(prompt.contains("# Plan Mode"));
         assert!(prompt.contains("PLAN.md"));
@@ -272,13 +264,5 @@ mod tests {
         let skill_dir = work_dir.join(".tiny-claw").join("skills").join(skill_id);
         fs::create_dir_all(&skill_dir).unwrap();
         fs::write(skill_dir.join("SKILL.md"), content).unwrap();
-    }
-
-    fn unique_temp_dir() -> PathBuf {
-        let suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("rust-tiny-claw-context-test-{suffix}"))
     }
 }

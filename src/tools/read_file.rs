@@ -178,26 +178,24 @@ mod tests {
     use crate::tools::Tool;
     use serde_json::json;
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use tempfile::tempdir;
 
     #[test]
     fn read_file_reads_workspace_relative_file() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(work_dir.join("src")).unwrap();
+        let work_dir = tempdir().unwrap();
+        fs::create_dir_all(work_dir.path().join("src")).unwrap();
         fs::write(
-            work_dir.join("src/lib.rs"),
+            work_dir.path().join("src/lib.rs"),
             "pub fn answer() -> u8 { 42 }\n// done\n",
         )
         .unwrap();
 
-        let tool = ReadFileTool::new(&work_dir).unwrap();
+        let tool = ReadFileTool::new(work_dir.path()).unwrap();
         let result = tool.execute(&ToolCall::new(
             "call_1",
             "read_file",
             json!({ "path": "src/lib.rs" }),
         ));
-
-        fs::remove_dir_all(&work_dir).unwrap();
 
         assert!(!result.is_error);
         assert!(result.output.contains("lines: 1-2 of 2"));
@@ -206,18 +204,19 @@ mod tests {
 
     #[test]
     fn read_file_reads_requested_line_range() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
-        fs::write(work_dir.join("long.txt"), "one\ntwo\nthree\nfour\nfive\n").unwrap();
+        let work_dir = tempdir().unwrap();
+        fs::write(
+            work_dir.path().join("long.txt"),
+            "one\ntwo\nthree\nfour\nfive\n",
+        )
+        .unwrap();
 
-        let tool = ReadFileTool::new(&work_dir).unwrap();
+        let tool = ReadFileTool::new(work_dir.path()).unwrap();
         let result = tool.execute(&ToolCall::new(
             "call_1",
             "read_file",
             json!({ "path": "long.txt", "start_line": 3, "line_count": 2 }),
         ));
-
-        fs::remove_dir_all(&work_dir).unwrap();
 
         assert!(!result.is_error);
         assert!(result.output.contains("lines: 3-4 of 5"));
@@ -228,22 +227,19 @@ mod tests {
 
     #[test]
     fn read_file_caps_requested_line_count() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
+        let work_dir = tempdir().unwrap();
         let content = (1..=500)
             .map(|line| format!("line {line}"))
             .collect::<Vec<_>>()
             .join("\n");
-        fs::write(work_dir.join("long.txt"), content).unwrap();
+        fs::write(work_dir.path().join("long.txt"), content).unwrap();
 
-        let tool = ReadFileTool::new(&work_dir).unwrap();
+        let tool = ReadFileTool::new(work_dir.path()).unwrap();
         let result = tool.execute(&ToolCall::new(
             "call_1",
             "read_file",
             json!({ "path": "long.txt", "line_count": 1000 }),
         ));
-
-        fs::remove_dir_all(&work_dir).unwrap();
 
         assert!(!result.is_error);
         assert!(result.output.contains("lines: 1-400 of 500"));
@@ -257,18 +253,15 @@ mod tests {
 
     #[test]
     fn read_file_rejects_invalid_range_arguments() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
-        fs::write(work_dir.join("file.txt"), "hello\n").unwrap();
+        let work_dir = tempdir().unwrap();
+        fs::write(work_dir.path().join("file.txt"), "hello\n").unwrap();
 
-        let tool = ReadFileTool::new(&work_dir).unwrap();
+        let tool = ReadFileTool::new(work_dir.path()).unwrap();
         let result = tool.execute(&ToolCall::new(
             "call_1",
             "read_file",
             json!({ "path": "file.txt", "start_line": 0 }),
         ));
-
-        fs::remove_dir_all(&work_dir).unwrap();
 
         assert!(result.is_error);
         assert!(result.output.contains("start_line"));
@@ -277,28 +270,17 @@ mod tests {
 
     #[test]
     fn read_file_rejects_absolute_paths() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
-        let absolute_path = work_dir.join("Cargo.toml");
+        let work_dir = tempdir().unwrap();
+        let absolute_path = work_dir.path().join("Cargo.toml");
 
-        let tool = ReadFileTool::new(&work_dir).unwrap();
+        let tool = ReadFileTool::new(work_dir.path()).unwrap();
         let result = tool.execute(&ToolCall::new(
             "call_1",
             "read_file",
             json!({ "path": absolute_path }),
         ));
 
-        fs::remove_dir_all(&work_dir).unwrap();
-
         assert!(result.is_error);
         assert!(result.output.contains("relative"));
-    }
-
-    fn unique_temp_dir() -> std::path::PathBuf {
-        let suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("rust-tiny-claw-test-{suffix}"))
     }
 }

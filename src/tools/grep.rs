@@ -340,22 +340,24 @@ mod tests {
     use crate::tools::{Tool, ToolAccessMode};
     use serde_json::json;
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use tempfile::tempdir;
 
     #[test]
     fn grep_searches_workspace_files() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(work_dir.join("src")).unwrap();
-        fs::write(work_dir.join("src/lib.rs"), "fn main() {}\n// TODO: auth\n").unwrap();
+        let work_dir = tempdir().unwrap();
+        fs::create_dir_all(work_dir.path().join("src")).unwrap();
+        fs::write(
+            work_dir.path().join("src/lib.rs"),
+            "fn main() {}\n// TODO: auth\n",
+        )
+        .unwrap();
 
-        let tool = GrepTool::new(&work_dir).unwrap();
+        let tool = GrepTool::new(work_dir.path()).unwrap();
         let result = tool.execute(&ToolCall::new(
             "call_1",
             "grep",
             json!({ "query": "TODO", "path": "src" }),
         ));
-
-        fs::remove_dir_all(&work_dir).unwrap();
 
         assert!(!result.is_error);
         if result
@@ -370,12 +372,9 @@ mod tests {
 
     #[test]
     fn grep_is_read_only() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
+        let work_dir = tempdir().unwrap();
 
-        let tool = GrepTool::new(&work_dir).unwrap();
-
-        fs::remove_dir_all(&work_dir).unwrap();
+        let tool = GrepTool::new(work_dir.path()).unwrap();
 
         assert_eq!(
             tool.access_mode(&ToolCall::new("call_1", "grep", json!({ "query": "x" }))),
@@ -385,18 +384,15 @@ mod tests {
 
     #[test]
     fn grep_rejects_absolute_paths() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
-        let absolute_path = work_dir.join("file.txt");
+        let work_dir = tempdir().unwrap();
+        let absolute_path = work_dir.path().join("file.txt");
 
-        let tool = GrepTool::new(&work_dir).unwrap();
+        let tool = GrepTool::new(work_dir.path()).unwrap();
         let result = tool.execute(&ToolCall::new(
             "call_1",
             "grep",
             json!({ "query": "x", "path": absolute_path }),
         ));
-
-        fs::remove_dir_all(&work_dir).unwrap();
 
         assert!(result.is_error);
         assert!(result.output.contains("relative"));
@@ -404,18 +400,15 @@ mod tests {
 
     #[test]
     fn grep_truncates_long_output() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
-        fs::write(work_dir.join("a.txt"), "needle\nneedle\nneedle\n").unwrap();
+        let work_dir = tempdir().unwrap();
+        fs::write(work_dir.path().join("a.txt"), "needle\nneedle\nneedle\n").unwrap();
 
-        let tool = GrepTool::with_output_limit(&work_dir, 12).unwrap();
+        let tool = GrepTool::with_output_limit(work_dir.path(), 12).unwrap();
         let result = tool.execute(&ToolCall::new(
             "call_1",
             "grep",
             json!({ "query": "needle", "path": "a.txt" }),
         ));
-
-        fs::remove_dir_all(&work_dir).unwrap();
 
         assert!(!result.is_error);
         if result
@@ -425,13 +418,5 @@ mod tests {
             return;
         }
         assert!(result.output.contains("truncated"));
-    }
-
-    fn unique_temp_dir() -> std::path::PathBuf {
-        let suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("rust-tiny-claw-test-{suffix}"))
     }
 }

@@ -211,18 +211,16 @@ fn find_frontmatter_end(rest: &str) -> Option<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use tempfile::tempdir;
 
     #[test]
     fn explicit_skills_load_in_requested_order() {
-        let work_dir = unique_temp_dir();
-        write_skill(&work_dir, "rust", "# Rust Skill\n");
-        write_skill(&work_dir, "git", "# Git Skill\n");
+        let work_dir = tempdir().unwrap();
+        write_skill(work_dir.path(), "rust", "# Rust Skill\n");
+        write_skill(work_dir.path(), "git", "# Git Skill\n");
 
         let skills =
-            load_active_skills(&work_dir, &["git".to_string(), "rust".to_string()]).unwrap();
-
-        fs::remove_dir_all(&work_dir).unwrap();
+            load_active_skills(work_dir.path(), &["git".to_string(), "rust".to_string()]).unwrap();
 
         assert_eq!(skills[0].id, "git");
         assert_eq!(skills[0].body, "# Git Skill\n");
@@ -232,16 +230,15 @@ mod tests {
 
     #[test]
     fn active_skill_manifests_load_metadata() {
-        let work_dir = unique_temp_dir();
+        let work_dir = tempdir().unwrap();
         write_skill(
-            &work_dir,
+            work_dir.path(),
             "rust",
             "---\nname: Rust\ndescription: Prefer Cargo workflows.\ndisable-model-invocation: false\n---\n\n# Rust Skill\n",
         );
 
-        let manifests = load_active_skill_manifests(&work_dir, &["rust".to_string()]).unwrap();
-
-        fs::remove_dir_all(&work_dir).unwrap();
+        let manifests =
+            load_active_skill_manifests(work_dir.path(), &["rust".to_string()]).unwrap();
 
         assert_eq!(manifests[0].id, "rust");
         assert_eq!(manifests[0].name, "Rust");
@@ -254,12 +251,11 @@ mod tests {
 
     #[test]
     fn manifest_defaults_to_model_invokable() {
-        let work_dir = unique_temp_dir();
-        write_skill(&work_dir, "rust", "# Rust Skill\n");
+        let work_dir = tempdir().unwrap();
+        write_skill(work_dir.path(), "rust", "# Rust Skill\n");
 
-        let manifests = load_active_skill_manifests(&work_dir, &["rust".to_string()]).unwrap();
-
-        fs::remove_dir_all(&work_dir).unwrap();
+        let manifests =
+            load_active_skill_manifests(work_dir.path(), &["rust".to_string()]).unwrap();
 
         assert_eq!(manifests[0].name, "rust");
         assert_eq!(manifests[0].description, None);
@@ -268,16 +264,15 @@ mod tests {
 
     #[test]
     fn invalid_disable_model_invocation_returns_error() {
-        let work_dir = unique_temp_dir();
+        let work_dir = tempdir().unwrap();
         write_skill(
-            &work_dir,
+            work_dir.path(),
             "rust",
             "---\ndisable-model-invocation: yes\n---\n\n# Rust Skill\n",
         );
 
-        let error = load_active_skill_manifests(&work_dir, &["rust".to_string()]).unwrap_err();
-
-        fs::remove_dir_all(&work_dir).unwrap();
+        let error =
+            load_active_skill_manifests(work_dir.path(), &["rust".to_string()]).unwrap_err();
 
         assert!(error.to_string().contains("disable-model-invocation"));
         assert!(error.to_string().contains("true or false"));
@@ -285,12 +280,9 @@ mod tests {
 
     #[test]
     fn missing_explicit_skill_returns_error() {
-        let work_dir = unique_temp_dir();
-        fs::create_dir_all(&work_dir).unwrap();
+        let work_dir = tempdir().unwrap();
 
-        let error = load_active_skills(&work_dir, &["missing".to_string()]).unwrap_err();
-
-        fs::remove_dir_all(&work_dir).unwrap();
+        let error = load_active_skills(work_dir.path(), &["missing".to_string()]).unwrap_err();
 
         assert!(error.to_string().contains(".tiny-claw"));
         assert!(error.to_string().contains("missing"));
@@ -298,32 +290,28 @@ mod tests {
 
     #[test]
     fn valid_frontmatter_is_removed_from_skill_body() {
-        let work_dir = unique_temp_dir();
+        let work_dir = tempdir().unwrap();
         write_skill(
-            &work_dir,
+            work_dir.path(),
             "rust",
             "---\nname: rust\ndescription: Rust conventions\n---\n\n# Rust Skill\n",
         );
 
-        let skills = load_active_skills(&work_dir, &["rust".to_string()]).unwrap();
-
-        fs::remove_dir_all(&work_dir).unwrap();
+        let skills = load_active_skills(work_dir.path(), &["rust".to_string()]).unwrap();
 
         assert_eq!(skills[0].body, "\n# Rust Skill\n");
     }
 
     #[test]
     fn malformed_frontmatter_renders_full_skill_file() {
-        let work_dir = unique_temp_dir();
+        let work_dir = tempdir().unwrap();
         write_skill(
-            &work_dir,
+            work_dir.path(),
             "rust",
             "---\ntags:\n- rust\n---\n\n# Rust Skill\n",
         );
 
-        let skills = load_active_skills(&work_dir, &["rust".to_string()]).unwrap();
-
-        fs::remove_dir_all(&work_dir).unwrap();
+        let skills = load_active_skills(work_dir.path(), &["rust".to_string()]).unwrap();
 
         assert!(skills[0].body.contains("tags:"));
         assert!(skills[0].body.contains("- rust"));
@@ -332,45 +320,39 @@ mod tests {
 
     #[test]
     fn model_invokable_skill_rejects_hidden_skill() {
-        let work_dir = unique_temp_dir();
+        let work_dir = tempdir().unwrap();
         write_skill(
-            &work_dir,
+            work_dir.path(),
             "secret",
             "---\ndisable-model-invocation: true\n---\n\n# Secret Skill\n",
         );
 
-        let error =
-            load_model_invokable_skill(&work_dir, &["secret".to_string()], "secret").unwrap_err();
-
-        fs::remove_dir_all(&work_dir).unwrap();
+        let error = load_model_invokable_skill(work_dir.path(), &["secret".to_string()], "secret")
+            .unwrap_err();
 
         assert!(error.to_string().contains("disabled for model invocation"));
     }
 
     #[test]
     fn model_invokable_skill_rejects_unenabled_skill() {
-        let work_dir = unique_temp_dir();
-        write_skill(&work_dir, "rust", "# Rust Skill\n");
+        let work_dir = tempdir().unwrap();
+        write_skill(work_dir.path(), "rust", "# Rust Skill\n");
 
-        let error = load_model_invokable_skill(&work_dir, &[], "rust").unwrap_err();
-
-        fs::remove_dir_all(&work_dir).unwrap();
+        let error = load_model_invokable_skill(work_dir.path(), &[], "rust").unwrap_err();
 
         assert!(error.to_string().contains("not enabled"));
     }
 
     #[test]
     fn crlf_frontmatter_is_removed_from_skill_body() {
-        let work_dir = unique_temp_dir();
+        let work_dir = tempdir().unwrap();
         write_skill(
-            &work_dir,
+            work_dir.path(),
             "rust",
             "---\r\nname: rust\r\ndescription: Rust conventions\r\n---\r\n\r\n# Rust Skill\r\n",
         );
 
-        let skills = load_active_skills(&work_dir, &["rust".to_string()]).unwrap();
-
-        fs::remove_dir_all(&work_dir).unwrap();
+        let skills = load_active_skills(work_dir.path(), &["rust".to_string()]).unwrap();
 
         assert_eq!(skills[0].body, "\r\n# Rust Skill\r\n");
     }
@@ -379,13 +361,5 @@ mod tests {
         let skill_dir = work_dir.join(".tiny-claw").join("skills").join(skill_id);
         fs::create_dir_all(&skill_dir).unwrap();
         fs::write(skill_dir.join("SKILL.md"), content).unwrap();
-    }
-
-    fn unique_temp_dir() -> PathBuf {
-        let suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("rust-tiny-claw-skills-test-{suffix}"))
     }
 }
