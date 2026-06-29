@@ -37,7 +37,13 @@ TINY_CLAW_API_KEY=...
 TINY_CLAW_BASE_URL=...
 TINY_CLAW_MODEL=...
 TINY_CLAW_STREAM=false
+TINY_CLAW_WORKSPACE=/srv/tiny-claw/workspace
 ```
+
+`TINY_CLAW_WORKSPACE` is optional for Feishu mode. If it is unset, the gateway
+creates and uses `.feishu-workspace` under the directory where the process is
+started. Set it explicitly when the bot should operate on a real project
+directory instead of the default local workspace.
 
 Use `.env.feishu` for Feishu and nginx-facing settings. Start from the checked-in
 template:
@@ -103,6 +109,10 @@ Run it from the repository root so it can read `.env` and `.env.feishu`:
 ```bash
 ./target/release/tiny-claw-feishu
 ```
+
+The process launch directory is only the configuration/deployment directory.
+The agent workspace is `TINY_CLAW_WORKSPACE` when configured, otherwise
+`./.feishu-workspace`.
 
 ## Logging
 

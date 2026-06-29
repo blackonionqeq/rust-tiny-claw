@@ -134,6 +134,11 @@ callback server explicitly:
 wsl -d Ubuntu -- bash -lc "cargo run --features feishu --bin tiny-claw-feishu"
 ```
 
+Unlike the CLI, Feishu mode does not use the launch directory as the agent
+workspace by default. It uses `TINY_CLAW_WORKSPACE` when set; otherwise it
+creates and uses `.feishu-workspace` under the launch directory. This keeps
+gateway deployment files separate from the files the agent can read and edit.
+
 The first callback endpoint is `POST /feishu/events`. It supports Feishu URL
 verification, text message receive events, tenant access token caching, and
 plain text replies to the originating chat. It also applies in-process message
