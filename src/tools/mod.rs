@@ -15,5 +15,7 @@ pub use permission::{
     PermissionDecision, RuleBasedToolPolicy, RuleDecision, TextPattern, ToolPolicy, ToolRule,
 };
 pub use read_file::ReadFileTool;
-pub use registry::{Tool, ToolAccessMode, ToolMiddleware, ToolRegistry, ToolRegistryError};
+pub use registry::{
+    Tool, ToolAccessMode, ToolExecutionContext, ToolMiddleware, ToolRegistry, ToolRegistryError,
+};
 pub use write_file::WriteFileTool;

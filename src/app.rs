@@ -10,7 +10,7 @@ use crate::provider::{
     ClaudeCompatibleProvider, MockProvider, OpenAiCompatibleProvider, Provider, ProviderError,
     ProviderFactory,
 };
-use crate::telemetry::Telemetry;
+use crate::telemetry::{Telemetry, TelemetryProvider, TelemetryToolMiddleware};
 use crate::tools::{
     BashTool, EditFileTool, GrepTool, LoadSkillTool, ReadFileTool, ToolRegistry, WriteFileTool,
 };
@@ -24,10 +24,11 @@ pub fn build_engine(
     work_dir: &Path,
 ) -> Result<AgentEngine<Box<dyn Provider + Send>>, Box<dyn std::error::Error>> {
     let work_dir = work_dir.canonicalize()?;
-    let provider_factory = Arc::new(EnvProviderFactory);
+    let telemetry = Telemetry::default();
+    let provider_factory = Arc::new(EnvProviderFactory::new(telemetry.clone()));
     let provider = provider_factory.create()?;
     let active_skills = active_skills_from_env();
-    let registry = build_registry(&work_dir, active_skills.clone())?;
+    let registry = build_registry(&work_dir, active_skills.clone(), telemetry.clone())?;
     let supervisor = AgentSupervisor::new(
         provider_factory,
         registry.clone(),
@@ -40,7 +41,7 @@ pub fn build_engine(
         registry,
         ContextManager::new(&work_dir, active_skills),
         FileMemory::new(work_dir.join(".tiny-claw")),
-        Telemetry::default(),
+        telemetry,
     )
     .with_supervisor(supervisor))
 }
@@ -53,9 +54,10 @@ pub fn build_feishu_engine(
     approval_manager: Arc<ApprovalManager>,
 ) -> Result<AgentEngine<Box<dyn Provider + Send>>, Box<dyn std::error::Error>> {
     let work_dir = work_dir.canonicalize()?;
-    let provider = build_provider()?;
+    let telemetry = Telemetry::default();
+    let provider = build_provider(telemetry.clone())?;
     let active_skills = active_skills_from_env();
-    let mut registry = build_registry(&work_dir, active_skills.clone())?;
+    let mut registry = build_registry(&work_dir, active_skills.clone(), telemetry.clone())?;
     let policy = Arc::new(RuleBasedToolPolicy::default());
 
     registry.use_middleware(
@@ -86,13 +88,14 @@ pub fn build_feishu_engine(
         registry,
         ContextManager::new(&work_dir, active_skills),
         FileMemory::new(work_dir.join(".tiny-claw")),
-        Telemetry::default(),
+        telemetry,
     ))
 }
 
 fn build_registry(
     work_dir: &Path,
     active_skills: Vec<String>,
+    telemetry: Telemetry,
 ) -> Result<ToolRegistry, Box<dyn std::error::Error>> {
     let mut registry = ToolRegistry::new();
     registry.register(ReadFileTool::new(work_dir)?)?;
@@ -101,6 +104,7 @@ fn build_registry(
     registry.register(BashTool::new(work_dir)?)?;
     registry.register(EditFileTool::new(work_dir)?)?;
     registry.register(GrepTool::new(work_dir)?)?;
+    registry.use_middleware(TelemetryToolMiddleware::new(telemetry));
     Ok(registry)
 }
 
@@ -139,22 +143,35 @@ fn active_skills_from_env() -> Vec<String> {
     skills
 }
 
-fn build_provider() -> Result<Box<dyn Provider + Send>, Box<dyn std::error::Error>> {
-    match env::var("TINY_CLAW_PROVIDER")
+fn build_provider(
+    telemetry: Telemetry,
+) -> Result<Box<dyn Provider + Send>, Box<dyn std::error::Error>> {
+    let provider: Box<dyn Provider + Send> = match env::var("TINY_CLAW_PROVIDER")
         .unwrap_or_else(|_| "mock".to_string())
         .as_str()
     {
-        "mock" => Ok(Box::new(MockProvider::default())),
-        "claude-compatible" => Ok(Box::new(ClaudeCompatibleProvider::from_env()?)),
-        "openai-compatible" => Ok(Box::new(OpenAiCompatibleProvider::from_env()?)),
-        other => Err(format!("unsupported TINY_CLAW_PROVIDER: {other}").into()),
+        "mock" => Box::new(MockProvider::default()),
+        "claude-compatible" => Box::new(ClaudeCompatibleProvider::from_env()?),
+        "openai-compatible" => Box::new(OpenAiCompatibleProvider::from_env()?),
+        other => return Err(format!("unsupported TINY_CLAW_PROVIDER: {other}").into()),
+    };
+
+    Ok(Box::new(TelemetryProvider::new(provider, telemetry)))
+}
+
+struct EnvProviderFactory {
+    telemetry: Telemetry,
+}
+
+impl EnvProviderFactory {
+    fn new(telemetry: Telemetry) -> Self {
+        Self { telemetry }
     }
 }
 
-struct EnvProviderFactory;
-
 impl ProviderFactory for EnvProviderFactory {
     fn create(&self) -> Result<Box<dyn Provider + Send>, ProviderError> {
-        build_provider().map_err(|error| ProviderError::new(error.to_string()))
+        build_provider(self.telemetry.clone())
+            .map_err(|error| ProviderError::new(error.to_string()))
     }
 }

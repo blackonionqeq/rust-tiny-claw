@@ -9,6 +9,13 @@ pub enum Role {
     Assistant,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Usage {
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub total_tokens: u64,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Message {
     pub role: Role,
@@ -16,6 +23,7 @@ pub struct Message {
     pub tool_calls: Vec<ToolCall>,
     // Present only on tool observations so the provider can match a result to a call.
     pub tool_call_id: Option<String>,
+    pub usage: Option<Usage>,
 }
 
 impl Message {
@@ -37,6 +45,7 @@ impl Message {
             content: content.into(),
             tool_calls,
             tool_call_id: None,
+            usage: None,
         }
     }
 
@@ -46,7 +55,13 @@ impl Message {
             content: content.into(),
             tool_calls: Vec::new(),
             tool_call_id: Some(tool_call_id.into()),
+            usage: None,
         }
+    }
+
+    pub fn with_usage(mut self, usage: Usage) -> Self {
+        self.usage = Some(usage);
+        self
     }
 
     fn new(role: Role, content: impl Into<String>) -> Self {
@@ -55,6 +70,7 @@ impl Message {
             content: content.into(),
             tool_calls: Vec::new(),
             tool_call_id: None,
+            usage: None,
         }
     }
 }

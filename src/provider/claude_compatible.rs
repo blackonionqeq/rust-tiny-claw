@@ -1,6 +1,6 @@
 use crate::provider::sse::read_sse_data_lines;
 use crate::provider::{Provider, ProviderError, StreamSink};
-use crate::schema::{Message, Role, ToolCall, ToolDefinition};
+use crate::schema::{Message, Role, ToolCall, ToolDefinition, Usage};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -337,10 +337,20 @@ fn parse_response(response: ClaudeMessageResponse) -> Result<Message, ProviderEr
         }
     }
 
-    if tool_calls.is_empty() {
-        Ok(Message::assistant(content))
+    let usage = response.usage.and_then(ClaudeUsage::into_usage);
+    let message = if tool_calls.is_empty() {
+        Message::assistant(content)
     } else {
-        Ok(Message::assistant_with_tools(content, tool_calls))
+        Message::assistant_with_tools(content, tool_calls)
+    };
+
+    Ok(with_optional_usage(message, usage))
+}
+
+fn with_optional_usage(message: Message, usage: Option<Usage>) -> Message {
+    match usage {
+        Some(usage) => message.with_usage(usage),
+        None => message,
     }
 }
 
@@ -404,6 +414,25 @@ struct ClaudeTool {
 #[derive(Debug, Deserialize)]
 struct ClaudeMessageResponse {
     content: Vec<ClaudeContentBlock>,
+    usage: Option<ClaudeUsage>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+struct ClaudeUsage {
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+}
+
+impl ClaudeUsage {
+    fn into_usage(self) -> Option<Usage> {
+        let prompt_tokens = self.input_tokens.unwrap_or_default();
+        let completion_tokens = self.output_tokens.unwrap_or_default();
+        (self.input_tokens.is_some() || self.output_tokens.is_some()).then_some(Usage {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens: prompt_tokens + completion_tokens,
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -424,6 +453,10 @@ enum ClaudeContentBlock {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
 enum ClaudeStreamEvent {
+    #[serde(rename = "message_start")]
+    MessageStart { message: ClaudeStreamMessage },
+    #[serde(rename = "message_delta")]
+    MessageDelta { usage: Option<ClaudeUsage> },
     #[serde(rename = "content_block_start")]
     ContentBlockStart {
         index: usize,
@@ -436,6 +469,11 @@ enum ClaudeStreamEvent {
     },
     #[serde(other)]
     Other,
+}
+
+#[derive(Debug, Deserialize)]
+struct ClaudeStreamMessage {
+    usage: Option<ClaudeUsage>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -462,6 +500,8 @@ enum ClaudeStreamDelta {
 struct ClaudeStreamState {
     content: String,
     tool_calls: Vec<ClaudeStreamToolCallState>,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
 }
 
 #[derive(Debug, Default)]
@@ -479,6 +519,12 @@ impl ClaudeStreamState {
         sink: &mut dyn StreamSink,
     ) -> Result<(), ProviderError> {
         match event {
+            ClaudeStreamEvent::MessageStart { message } => {
+                self.apply_usage(message.usage);
+            }
+            ClaudeStreamEvent::MessageDelta { usage, .. } => {
+                self.apply_usage(usage);
+            }
             ClaudeStreamEvent::ContentBlockStart {
                 index,
                 content_block: ClaudeStreamContentBlockStart::ToolUse { id, name },
@@ -519,6 +565,21 @@ impl ClaudeStreamState {
         Ok(())
     }
 
+    fn apply_usage(&mut self, usage: Option<ClaudeUsage>) {
+        let Some(usage) = usage else {
+            return;
+        };
+
+        // Claude can report input tokens on message_start and output tokens on
+        // later message_delta events, so merge the latest known fields.
+        if let Some(input_tokens) = usage.input_tokens {
+            self.input_tokens = Some(input_tokens);
+        }
+        if let Some(output_tokens) = usage.output_tokens {
+            self.output_tokens = Some(output_tokens);
+        }
+    }
+
     fn into_message(self) -> Result<Message, ProviderError> {
         let tool_calls = self
             .tool_calls
@@ -543,11 +604,23 @@ impl ClaudeStreamState {
             })
             .collect::<Result<Vec<_>, ProviderError>>()?;
 
-        if tool_calls.is_empty() {
-            Ok(Message::assistant(self.content))
+        let usage = (self.input_tokens.is_some() || self.output_tokens.is_some()).then(|| {
+            let prompt_tokens = self.input_tokens.unwrap_or_default();
+            let completion_tokens = self.output_tokens.unwrap_or_default();
+            Usage {
+                prompt_tokens,
+                completion_tokens,
+                total_tokens: prompt_tokens + completion_tokens,
+            }
+        });
+
+        let message = if tool_calls.is_empty() {
+            Message::assistant(self.content)
         } else {
-            Ok(Message::assistant_with_tools(self.content, tool_calls))
-        }
+            Message::assistant_with_tools(self.content, tool_calls)
+        };
+
+        Ok(with_optional_usage(message, usage))
     }
 }
 
@@ -678,6 +751,7 @@ mod tests {
                     input: json!({ "text": "hi" }),
                 },
             ],
+            usage: None,
         };
 
         let message = parse_response(response).unwrap();
@@ -695,6 +769,7 @@ mod tests {
                 name: "echo".to_string(),
                 input: json!("not an object"),
             }],
+            usage: None,
         };
 
         let error = parse_response(response).unwrap_err().to_string();
@@ -727,6 +802,30 @@ mod tests {
         assert_eq!(message.content, "");
         assert_eq!(message.tool_calls.len(), 1);
         assert_eq!(message.tool_calls[0].name, "echo");
+    }
+
+    #[test]
+    fn response_maps_usage_to_internal_message() {
+        let response = ClaudeMessageResponse {
+            content: vec![ClaudeContentBlock::Text {
+                text: "hello".to_string(),
+            }],
+            usage: Some(ClaudeUsage {
+                input_tokens: Some(7),
+                output_tokens: Some(11),
+            }),
+        };
+
+        let message = parse_response(response).unwrap();
+
+        assert_eq!(
+            message.usage,
+            Some(Usage {
+                prompt_tokens: 7,
+                completion_tokens: 11,
+                total_tokens: 18
+            })
+        );
     }
 
     #[test]
@@ -791,6 +890,42 @@ mod tests {
         assert_eq!(message.tool_calls.len(), 1);
         assert_eq!(message.tool_calls[0].id, "toolu_1");
         assert_eq!(message.tool_calls[0].arguments, json!({ "text": "hi" }));
+    }
+
+    #[test]
+    fn stream_events_attach_usage_to_final_message() {
+        let events = vec![
+            ClaudeStreamEvent::MessageStart {
+                message: ClaudeStreamMessage {
+                    usage: Some(ClaudeUsage {
+                        input_tokens: Some(13),
+                        output_tokens: None,
+                    }),
+                },
+            },
+            ClaudeStreamEvent::MessageDelta {
+                usage: Some(ClaudeUsage {
+                    input_tokens: None,
+                    output_tokens: Some(17),
+                }),
+            },
+        ];
+        let mut state = ClaudeStreamState::default();
+        let mut sink = TestSink::default();
+
+        for event in events {
+            state.apply(event, &mut sink).unwrap();
+        }
+
+        let message = state.into_message().unwrap();
+        assert_eq!(
+            message.usage,
+            Some(Usage {
+                prompt_tokens: 13,
+                completion_tokens: 17,
+                total_tokens: 30
+            })
+        );
     }
 
     #[derive(Default)]

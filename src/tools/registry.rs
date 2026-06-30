@@ -2,6 +2,7 @@ use crate::schema::{ToolCall, ToolDefinition, ToolResult};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 // Tools expose a model-facing definition and own the execution of their calls.
 pub trait Tool: Send + Sync {
@@ -85,7 +86,7 @@ impl ToolRegistry {
 
         Ok(Self {
             tools,
-            middlewares: Vec::new(),
+            middlewares: self.middlewares.clone(),
         })
     }
 
@@ -100,11 +101,25 @@ impl ToolRegistry {
 
         for middleware in &self.middlewares {
             if let Some(result) = middleware.before_execute(call) {
+                // Policy rejections are not executed tool work, so they do not
+                // receive timing context or after_execute callbacks.
                 return result;
             }
         }
 
-        tool.execute(call)
+        let access_mode = tool.access_mode(call);
+        let start = Instant::now();
+        let result = tool.execute(call);
+        let context = ToolExecutionContext {
+            elapsed: start.elapsed(),
+            access_mode,
+        };
+
+        for middleware in &self.middlewares {
+            middleware.after_execute(call, &result, &context);
+        }
+
+        result
     }
 
     pub fn is_read_only_call(&self, call: &ToolCall) -> bool {
@@ -114,8 +129,24 @@ impl ToolRegistry {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToolExecutionContext {
+    pub elapsed: Duration,
+    pub access_mode: ToolAccessMode,
+}
+
 pub trait ToolMiddleware: Send + Sync {
-    fn before_execute(&self, call: &ToolCall) -> Option<ToolResult>;
+    fn before_execute(&self, _call: &ToolCall) -> Option<ToolResult> {
+        None
+    }
+
+    fn after_execute(
+        &self,
+        _call: &ToolCall,
+        _result: &ToolResult,
+        _context: &ToolExecutionContext,
+    ) {
+    }
 }
 
 impl<F> ToolMiddleware for F
@@ -146,9 +177,10 @@ impl std::error::Error for ToolRegistryError {}
 
 #[cfg(test)]
 mod tests {
-    use super::{Tool, ToolRegistry};
+    use super::{Tool, ToolExecutionContext, ToolMiddleware, ToolRegistry};
     use crate::schema::{ToolCall, ToolResult};
     use crate::tools::ReadFileTool;
+    use std::sync::{Arc, Mutex};
     use tempfile::tempdir;
 
     #[derive(Debug, Default)]
@@ -172,6 +204,49 @@ mod tests {
 
         fn execute(&self, call: &ToolCall) -> ToolResult {
             ToolResult::ok(call.id.clone(), "ok")
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct ErrorTool;
+
+    impl Tool for ErrorTool {
+        fn name(&self) -> &'static str {
+            "error"
+        }
+
+        fn description(&self) -> &'static str {
+            "Test-only error tool."
+        }
+
+        fn input_schema(&self) -> serde_json::Value {
+            serde_json::json!({
+                "type": "object",
+                "properties": {}
+            })
+        }
+
+        fn execute(&self, call: &ToolCall) -> ToolResult {
+            ToolResult::error(call.id.clone(), "failed")
+        }
+    }
+
+    #[derive(Clone)]
+    struct AfterRecorder {
+        calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl ToolMiddleware for AfterRecorder {
+        fn after_execute(
+            &self,
+            call: &ToolCall,
+            result: &ToolResult,
+            context: &ToolExecutionContext,
+        ) {
+            self.calls.lock().unwrap().push(format!(
+                "{}:{}:{:?}",
+                call.id, result.is_error, context.access_mode
+            ));
         }
     }
 
@@ -229,5 +304,59 @@ mod tests {
 
         assert!(result.is_error);
         assert_eq!(result.output, "tool 'missing' is not registered");
+    }
+
+    #[test]
+    fn after_middleware_runs_after_successful_tool_execution() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mut registry = ToolRegistry::new();
+        registry.register(TestTool).unwrap();
+        registry.use_middleware(AfterRecorder {
+            calls: Arc::clone(&calls),
+        });
+
+        let result = registry.execute(&ToolCall::new("call_1", "test", serde_json::json!({})));
+
+        assert!(!result.is_error);
+        assert_eq!(
+            calls.lock().unwrap().as_slice(),
+            ["call_1:false:MutatesWorkspace"]
+        );
+    }
+
+    #[test]
+    fn after_middleware_runs_after_tool_error_result() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mut registry = ToolRegistry::new();
+        registry.register(ErrorTool).unwrap();
+        registry.use_middleware(AfterRecorder {
+            calls: Arc::clone(&calls),
+        });
+
+        let result = registry.execute(&ToolCall::new("call_1", "error", serde_json::json!({})));
+
+        assert!(result.is_error);
+        assert_eq!(
+            calls.lock().unwrap().as_slice(),
+            ["call_1:true:MutatesWorkspace"]
+        );
+    }
+
+    #[test]
+    fn after_middleware_does_not_run_when_before_middleware_rejects() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mut registry = ToolRegistry::new();
+        registry.register(TestTool).unwrap();
+        registry.use_middleware(|call: &ToolCall| {
+            Some(ToolResult::error(call.id.clone(), "blocked by middleware"))
+        });
+        registry.use_middleware(AfterRecorder {
+            calls: Arc::clone(&calls),
+        });
+
+        let result = registry.execute(&ToolCall::new("call_1", "test", serde_json::json!({})));
+
+        assert!(result.is_error);
+        assert!(calls.lock().unwrap().is_empty());
     }
 }

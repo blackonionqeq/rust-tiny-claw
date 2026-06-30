@@ -1,6 +1,6 @@
 use crate::provider::sse::read_sse_data_lines;
 use crate::provider::{Provider, ProviderError, StreamSink};
-use crate::schema::{Message, Role, ToolCall, ToolDefinition};
+use crate::schema::{Message, Role, ToolCall, ToolDefinition, Usage};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -175,6 +175,7 @@ fn build_request(
         messages,
         tools,
         stream: false,
+        stream_options: None,
     })
 }
 
@@ -185,6 +186,9 @@ fn build_stream_request(
 ) -> Result<ChatCompletionRequest, ProviderError> {
     let mut request = build_request(model, messages, available_tools)?;
     request.stream = true;
+    request.stream_options = Some(ChatCompletionStreamOptions {
+        include_usage: true,
+    });
     Ok(request)
 }
 
@@ -275,15 +279,20 @@ fn parse_response(response: ChatCompletionResponse) -> Result<Message, ProviderE
         })
         .collect::<Result<Vec<_>, ProviderError>>()?;
 
-    if tool_calls.is_empty() {
-        Ok(Message::assistant(
-            choice.message.content.unwrap_or_default(),
-        ))
+    let usage = response.usage.map(Into::into);
+    let message = if tool_calls.is_empty() {
+        Message::assistant(choice.message.content.unwrap_or_default())
     } else {
-        Ok(Message::assistant_with_tools(
-            choice.message.content.unwrap_or_default(),
-            tool_calls,
-        ))
+        Message::assistant_with_tools(choice.message.content.unwrap_or_default(), tool_calls)
+    };
+
+    Ok(with_optional_usage(message, usage))
+}
+
+fn with_optional_usage(message: Message, usage: Option<Usage>) -> Message {
+    match usage {
+        Some(usage) => message.with_usage(usage),
+        None => message,
     }
 }
 
@@ -294,6 +303,13 @@ struct ChatCompletionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<OpenAiTool>>,
     stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<ChatCompletionStreamOptions>,
+}
+
+#[derive(Debug, Serialize)]
+struct ChatCompletionStreamOptions {
+    include_usage: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -338,6 +354,7 @@ struct OpenAiToolCallFunction {
 #[derive(Debug, Deserialize)]
 struct ChatCompletionResponse {
     choices: Vec<ChatCompletionChoice>,
+    usage: Option<OpenAiUsage>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -363,9 +380,27 @@ struct ChatCompletionToolCallFunction {
     arguments: String,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize)]
+struct OpenAiUsage {
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    total_tokens: u64,
+}
+
+impl From<OpenAiUsage> for Usage {
+    fn from(usage: OpenAiUsage) -> Self {
+        Self {
+            prompt_tokens: usage.prompt_tokens,
+            completion_tokens: usage.completion_tokens,
+            total_tokens: usage.total_tokens,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct ChatCompletionStreamChunk {
     choices: Vec<ChatCompletionStreamChoice>,
+    usage: Option<OpenAiUsage>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -396,6 +431,7 @@ struct ChatCompletionStreamToolCallFunction {
 struct OpenAiStreamState {
     content: String,
     tool_calls: Vec<OpenAiStreamToolCallState>,
+    usage: Option<Usage>,
 }
 
 #[derive(Debug, Default)]
@@ -411,6 +447,12 @@ impl OpenAiStreamState {
         chunk: ChatCompletionStreamChunk,
         sink: &mut dyn StreamSink,
     ) -> Result<(), ProviderError> {
+        // OpenAI-compatible endpoints may send a final usage-only chunk with
+        // no choices when stream_options.include_usage is enabled.
+        if let Some(usage) = chunk.usage {
+            self.usage = Some(usage.into());
+        }
+
         for choice in chunk.choices {
             if let Some(content) = choice.delta.content {
                 sink.on_text(&content)?;
@@ -463,11 +505,13 @@ impl OpenAiStreamState {
             })
             .collect::<Result<Vec<_>, ProviderError>>()?;
 
-        if tool_calls.is_empty() {
-            Ok(Message::assistant(self.content))
+        let message = if tool_calls.is_empty() {
+            Message::assistant(self.content)
         } else {
-            Ok(Message::assistant_with_tools(self.content, tool_calls))
-        }
+            Message::assistant_with_tools(self.content, tool_calls)
+        };
+
+        Ok(with_optional_usage(message, self.usage))
     }
 }
 
@@ -552,6 +596,7 @@ mod tests {
                     }]),
                 },
             }],
+            usage: None,
         };
 
         let message = parse_response(response).unwrap();
@@ -576,6 +621,7 @@ mod tests {
                     }]),
                 },
             }],
+            usage: None,
         };
 
         let error = parse_response(response).unwrap_err().to_string();
@@ -594,6 +640,7 @@ mod tests {
                         tool_calls: None,
                     },
                 }],
+                usage: None,
             },
             ChatCompletionStreamChunk {
                 choices: vec![ChatCompletionStreamChoice {
@@ -602,6 +649,7 @@ mod tests {
                         tool_calls: None,
                     },
                 }],
+                usage: None,
             },
         ];
         let mut state = OpenAiStreamState::default();
@@ -633,6 +681,7 @@ mod tests {
                         }]),
                     },
                 }],
+                usage: None,
             },
             ChatCompletionStreamChunk {
                 choices: vec![ChatCompletionStreamChoice {
@@ -648,6 +697,7 @@ mod tests {
                         }]),
                     },
                 }],
+                usage: None,
             },
         ];
         let mut state = OpenAiStreamState::default();
@@ -661,6 +711,64 @@ mod tests {
         assert_eq!(message.tool_calls.len(), 1);
         assert_eq!(message.tool_calls[0].id, "call_1");
         assert_eq!(message.tool_calls[0].arguments, json!({ "text": "hi" }));
+    }
+
+    #[test]
+    fn response_maps_usage_to_internal_message() {
+        let response = ChatCompletionResponse {
+            choices: vec![ChatCompletionChoice {
+                message: ChatCompletionMessage {
+                    content: Some("hello".to_string()),
+                    tool_calls: None,
+                },
+            }],
+            usage: Some(OpenAiUsage {
+                prompt_tokens: 3,
+                completion_tokens: 5,
+                total_tokens: 8,
+            }),
+        };
+
+        let message = parse_response(response).unwrap();
+
+        assert_eq!(
+            message.usage,
+            Some(Usage {
+                prompt_tokens: 3,
+                completion_tokens: 5,
+                total_tokens: 8
+            })
+        );
+    }
+
+    #[test]
+    fn stream_usage_only_chunk_is_attached_to_final_message() {
+        let mut state = OpenAiStreamState::default();
+        let mut sink = TestSink::default();
+
+        state
+            .apply(
+                ChatCompletionStreamChunk {
+                    choices: Vec::new(),
+                    usage: Some(OpenAiUsage {
+                        prompt_tokens: 2,
+                        completion_tokens: 4,
+                        total_tokens: 6,
+                    }),
+                },
+                &mut sink,
+            )
+            .unwrap();
+
+        let message = state.into_message().unwrap();
+        assert_eq!(
+            message.usage,
+            Some(Usage {
+                prompt_tokens: 2,
+                completion_tokens: 4,
+                total_tokens: 6
+            })
+        );
     }
 
     #[derive(Default)]
