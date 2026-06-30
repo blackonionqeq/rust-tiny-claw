@@ -26,6 +26,10 @@ name = "tiny-claw"
 path = "src/bin/tiny-claw.rs"
 
 [[bin]]
+name = "tiny-claw-bench"
+path = "src/bin/tiny-claw-bench.rs"
+
+[[bin]]
 name = "tiny-claw-feishu"
 path = "src/bin/tiny-claw-feishu.rs"
 required-features = ["feishu"]

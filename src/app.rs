@@ -29,7 +29,7 @@ pub fn build_engine(
     let provider_factory = Arc::new(EnvProviderFactory::new(telemetry.clone()));
     let provider = provider_factory.create()?;
     let active_skills = active_skills_from_env();
-    let registry = build_registry(&work_dir, active_skills.clone(), telemetry.clone())?;
+    let (registry, context, memory) = build_runtime(&work_dir, active_skills, telemetry.clone())?;
     let supervisor = AgentSupervisor::new(
         provider_factory,
         registry.clone(),
@@ -37,14 +37,26 @@ pub fn build_engine(
         work_dir.join(".tiny-claw"),
     );
 
-    Ok(AgentEngine::new(
-        provider,
-        registry,
-        ContextManager::new(&work_dir, active_skills),
-        FileMemory::new(work_dir.join(".tiny-claw")),
-        telemetry,
+    Ok(
+        AgentEngine::new(provider, registry, context, memory, telemetry)
+            .with_supervisor(supervisor),
     )
-    .with_supervisor(supervisor))
+}
+
+// Assemble the workspace-bound runtime pieces shared by every entry point:
+// the tool registry (with telemetry middleware), the context manager, and the
+// file-backed memory. Exposed so the benchmark runner and tests can build an
+// engine with an injected provider and a fresh telemetry handle without going
+// through the env-coupled `build_engine` path.
+pub fn build_runtime(
+    work_dir: &Path,
+    active_skills: Vec<String>,
+    telemetry: Telemetry,
+) -> Result<(ToolRegistry, ContextManager, FileMemory), Box<dyn std::error::Error>> {
+    let registry = build_registry(work_dir, active_skills.clone(), telemetry)?;
+    let context = ContextManager::new(work_dir, active_skills);
+    let memory = FileMemory::new(work_dir.join(".tiny-claw"));
+    Ok((registry, context, memory))
 }
 
 #[cfg(feature = "feishu")]

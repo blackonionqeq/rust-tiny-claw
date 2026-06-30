@@ -2,6 +2,7 @@ pub mod agent_runtime;
 pub mod app;
 pub mod context_engine;
 pub mod engine;
+pub mod eval;
 pub mod integrations;
 pub mod memory;
 pub mod plan_mode;

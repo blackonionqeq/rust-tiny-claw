@@ -33,6 +33,9 @@ jobs:
       - name: Test default build
         run: cargo test
 
+      - name: Run deterministic benchmark
+        run: cargo run --bin tiny-claw-bench -- --json
+
       - name: Check Feishu build
         run: cargo check --features feishu --bin tiny-claw-feishu
 

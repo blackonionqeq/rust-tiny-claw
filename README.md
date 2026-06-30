@@ -88,6 +88,34 @@ are advertised to the model as compact metadata first. The model can call
 `disable-model-invocation: true` to a skill's frontmatter to keep it out of the
 model-visible catalog.
 
+## Benchmark
+
+`tiny-claw-bench` runs an automated evaluation suite: each case seeds an
+isolated workspace, lets the engine act, then grades the result with an
+objective assertion instead of trusting the model's self-report. It reuses the
+engine's telemetry for token counts and tool-failure counts, and reports a
+turns-used "smoothness" metric per case.
+
+Two tiers share one runner:
+
+- Deterministic (default): a scripted provider replays fixed model turns so the
+  suite exercises real engine/tool mechanics (fuzzy `edit_file`, dispatch,
+  recovery) with no network and no API cost. A pass-rate drop here means a
+  harness regression. This is the CI gate.
+- Live (`--live`): a real provider measures actual agent capability. It costs
+  money and is non-deterministic, so it stays opt-in and needs
+  `TINY_CLAW_PROVIDER` plus `TINY_CLAW_API_KEY`.
+
+```powershell
+wsl -d Ubuntu -- bash -lc "cargo run --bin tiny-claw-bench"
+wsl -d Ubuntu -- bash -lc "cargo run --bin tiny-claw-bench -- --json"
+wsl -d Ubuntu -- bash -lc "TINY_CLAW_PROVIDER=openai-compatible TINY_CLAW_API_KEY=... cargo run --bin tiny-claw-bench -- --live"
+```
+
+`--keep` retains the per-case workspace directories under the system temp dir
+for inspecting a failed run. See
+[docs/design/benchmark-eval.md](docs/design/benchmark-eval.md) for the design.
+
 ## Tool Dispatch
 
 The harness supports parallel tool calling for read-only batches. When
