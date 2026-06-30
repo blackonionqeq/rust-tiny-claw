@@ -20,7 +20,7 @@ pub enum ToolAccessMode {
     MutatesWorkspace,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct ToolRegistry {
     tools: HashMap<&'static str, Arc<dyn Tool>>,
     middlewares: Vec<Arc<dyn ToolMiddleware>>,
@@ -71,6 +71,22 @@ impl ToolRegistry {
             .filter_map(|name| self.tools.get(name))
             .map(|tool| ToolDefinition::new(tool.name(), tool.description(), tool.input_schema()))
             .collect()
+    }
+
+    pub fn subset(&self, names: &[&'static str]) -> Result<Self, String> {
+        let mut tools = HashMap::new();
+        for name in names {
+            let tool = self
+                .tools
+                .get(name)
+                .ok_or_else(|| format!("tool profile references unknown tool: {name}"))?;
+            tools.insert(*name, Arc::clone(tool));
+        }
+
+        Ok(Self {
+            tools,
+            middlewares: Vec::new(),
+        })
     }
 
     pub fn execute(&self, call: &ToolCall) -> ToolResult {

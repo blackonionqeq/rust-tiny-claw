@@ -17,6 +17,12 @@ pub use skills::{SkillDocument, SkillManifest, load_model_invokable_skill};
 const BASE_INSTRUCTIONS: &str =
     "You are rust-tiny-claw, a small coding assistant running inside one workspace.";
 
+const SUBAGENT_DELEGATION_INSTRUCTIONS: &str = r#"# Subagent Delegation
+
+You may delegate bounded investigation work to subagents when broad exploration would pollute the main context. Use subagents for multi-file or uncertain exploration that can be summarized as evidence. Do not use subagents for small known reads, final decisions, or workspace mutations.
+
+When you need detailed subagent templates, delegation rules, waiting behavior, or examples, load the `subagents` skill."#;
+
 // Plan Mode is prompt-only state externalization: the engine stays stateless
 // about task plans and lets the model maintain PLAN.md/TODO.md through tools.
 const PLAN_MODE_INSTRUCTIONS: &str = r#"# Plan Mode
@@ -57,6 +63,7 @@ impl ContextManager {
 
     pub fn build_system_prompt(&self, plan_mode: bool) -> Result<String, ContextError> {
         let mut sections = vec![format!("# Base Instructions\n\n{BASE_INSTRUCTIONS}")];
+        sections.push(SUBAGENT_DELEGATION_INSTRUCTIONS.to_string());
 
         if plan_mode {
             sections.push(PLAN_MODE_INSTRUCTIONS.to_string());

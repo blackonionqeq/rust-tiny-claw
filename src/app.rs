@@ -1,3 +1,4 @@
+use crate::agent_runtime::AgentSupervisor;
 use crate::context_engine::ContextManager;
 use crate::engine::AgentEngine;
 #[cfg(feature = "feishu")]
@@ -5,7 +6,10 @@ use crate::integrations::feishu::approval::ApprovalManager;
 #[cfg(feature = "feishu")]
 use crate::integrations::feishu::client::FeishuClient;
 use crate::memory::FileMemory;
-use crate::provider::{ClaudeCompatibleProvider, MockProvider, OpenAiCompatibleProvider, Provider};
+use crate::provider::{
+    ClaudeCompatibleProvider, MockProvider, OpenAiCompatibleProvider, Provider, ProviderError,
+    ProviderFactory,
+};
 use crate::telemetry::Telemetry;
 use crate::tools::{
     BashTool, EditFileTool, GrepTool, LoadSkillTool, ReadFileTool, ToolRegistry, WriteFileTool,
@@ -14,16 +18,22 @@ use crate::tools::{
 use crate::tools::{PermissionDecision, RuleBasedToolPolicy, ToolPolicy};
 use std::env;
 use std::path::Path;
-#[cfg(feature = "feishu")]
 use std::sync::Arc;
 
 pub fn build_engine(
     work_dir: &Path,
-) -> Result<AgentEngine<Box<dyn Provider>>, Box<dyn std::error::Error>> {
+) -> Result<AgentEngine<Box<dyn Provider + Send>>, Box<dyn std::error::Error>> {
     let work_dir = work_dir.canonicalize()?;
-    let provider = build_provider()?;
+    let provider_factory = Arc::new(EnvProviderFactory);
+    let provider = provider_factory.create()?;
     let active_skills = active_skills_from_env();
     let registry = build_registry(&work_dir, active_skills.clone())?;
+    let supervisor = AgentSupervisor::new(
+        provider_factory,
+        registry.clone(),
+        work_dir.clone(),
+        work_dir.join(".tiny-claw"),
+    );
 
     Ok(AgentEngine::new(
         provider,
@@ -31,7 +41,8 @@ pub fn build_engine(
         ContextManager::new(&work_dir, active_skills),
         FileMemory::new(work_dir.join(".tiny-claw")),
         Telemetry::default(),
-    ))
+    )
+    .with_supervisor(supervisor))
 }
 
 #[cfg(feature = "feishu")]
@@ -40,7 +51,7 @@ pub fn build_feishu_engine(
     client: FeishuClient,
     chat_id: String,
     approval_manager: Arc<ApprovalManager>,
-) -> Result<AgentEngine<Box<dyn Provider>>, Box<dyn std::error::Error>> {
+) -> Result<AgentEngine<Box<dyn Provider + Send>>, Box<dyn std::error::Error>> {
     let work_dir = work_dir.canonicalize()?;
     let provider = build_provider()?;
     let active_skills = active_skills_from_env();
@@ -109,21 +120,26 @@ fn parse_bool_env(name: &str, value: &str) -> Result<bool, Box<dyn std::error::E
 }
 
 fn active_skills_from_env() -> Vec<String> {
-    env::var("TINY_CLAW_SKILLS")
-        .ok()
-        .into_iter()
-        .flat_map(|value| {
-            value
-                .split(',')
-                .map(str::trim)
-                .filter(|skill| !skill.is_empty())
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        })
-        .collect()
+    let mut skills = vec!["subagents".to_string()];
+    skills.extend(
+        env::var("TINY_CLAW_SKILLS")
+            .ok()
+            .into_iter()
+            .flat_map(|value| {
+                value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|skill| !skill.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            }),
+    );
+    skills.sort();
+    skills.dedup();
+    skills
 }
 
-fn build_provider() -> Result<Box<dyn Provider>, Box<dyn std::error::Error>> {
+fn build_provider() -> Result<Box<dyn Provider + Send>, Box<dyn std::error::Error>> {
     match env::var("TINY_CLAW_PROVIDER")
         .unwrap_or_else(|_| "mock".to_string())
         .as_str()
@@ -132,5 +148,13 @@ fn build_provider() -> Result<Box<dyn Provider>, Box<dyn std::error::Error>> {
         "claude-compatible" => Ok(Box::new(ClaudeCompatibleProvider::from_env()?)),
         "openai-compatible" => Ok(Box::new(OpenAiCompatibleProvider::from_env()?)),
         other => Err(format!("unsupported TINY_CLAW_PROVIDER: {other}").into()),
+    }
+}
+
+struct EnvProviderFactory;
+
+impl ProviderFactory for EnvProviderFactory {
+    fn create(&self) -> Result<Box<dyn Provider + Send>, ProviderError> {
+        build_provider().map_err(|error| ProviderError::new(error.to_string()))
     }
 }

@@ -1,3 +1,4 @@
+pub mod agent_runtime;
 pub mod app;
 pub mod context_engine;
 pub mod engine;

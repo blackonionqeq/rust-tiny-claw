@@ -3,11 +3,12 @@
 Rust learning project for building an Agent Harness lesson by lesson.
 
 Current chapter state: the harness can run a two-stage ReAct loop, call local
-workspace tools, execute same-turn tool batches in parallel, and keep bounded
-provider request contexts over full per-session history. For long-running tasks,
-Plan Mode can prompt the model to externalize task state into workspace
-`PLAN.md` and `TODO.md` files. It supports the built-in mock provider plus
-OpenAI/Claude-compatible HTTP providers.
+workspace tools, execute same-turn tool batches in parallel, keep bounded
+provider request contexts over full per-session history, and delegate isolated
+read-only exploration to subagents. For long-running tasks, Plan Mode can prompt
+the model to externalize task state into workspace `PLAN.md` and `TODO.md`
+files. It supports the built-in mock provider plus OpenAI/Claude-compatible HTTP
+providers.
 
 ## Run
 
@@ -97,6 +98,27 @@ This implementation intentionally follows the course scope: it trusts the
 model's same-turn independence assumption for read-only exploration and does
 not yet add path-based file locks, async file APIs, or a global concurrency
 limit. Those are production hardening topics for later lessons.
+
+## Subagent Delegation
+
+The CLI engine exposes subagent runtime commands alongside normal tool schemas,
+but they are dispatched by the engine runtime rather than registered in
+`ToolRegistry`:
+
+- `delegate_agent`: starts a subagent from a template and returns an `agent_id`.
+- `agent_status`: reports whether the subagent is running, completed, failed, or
+  cancelled.
+- `join_agent`: waits for completion and returns only the final report.
+- `cancel_agent`: requests cooperative cancellation.
+
+The first built-in template is `explorer`, a read-only repository investigation
+agent. It receives only `read_file`, `grep`, and `load_skill`, and writes its
+isolated records under `.tiny-claw/agents/<agent_id>/`.
+
+Built-in runtime resources live under `resources/`, starting with
+`resources/skills/subagents/SKILL.md`. Workspace-local skills can still be added
+under `.tiny-claw/skills/`; they may add new ids, but built-in ids take
+precedence.
 
 ## Tool Set
 

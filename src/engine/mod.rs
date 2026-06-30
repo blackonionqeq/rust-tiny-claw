@@ -1,3 +1,4 @@
+use crate::agent_runtime::AgentSupervisor;
 use crate::context_engine::{
     ContextBudget, ContextCompactor, ContextError, ContextManager, RecoveryManager, ReminderManager,
 };
@@ -19,6 +20,7 @@ pub struct AgentEngine<P> {
     context: ContextManager,
     memory: FileMemory,
     telemetry: Telemetry,
+    supervisor: Option<AgentSupervisor>,
 }
 
 impl<P> AgentEngine<P>
@@ -38,7 +40,13 @@ where
             context,
             memory,
             telemetry,
+            supervisor: None,
         }
+    }
+
+    pub fn with_supervisor(mut self, supervisor: AgentSupervisor) -> Self {
+        self.supervisor = Some(supervisor);
+        self
     }
 
     pub fn boot_plan(&self, options: RunOptions) -> Vec<String> {
@@ -118,7 +126,7 @@ where
             messages.extend(session.history());
             let mut messages = ContextCompactor::new(options.context_budget).compact(&messages);
 
-            let available_tools = self.registry.definitions();
+            let available_tools = self.action_definitions();
             if options.enable_thinking {
                 reporter.on_thinking_start()?;
 
@@ -176,7 +184,7 @@ where
 
             reporter.on_tool_calls(&tool_calls)?;
 
-            let results = self.execute_tool_batch_with_reporter(&tool_calls, reporter)?;
+            let results = self.execute_action_batch_with_reporter(&tool_calls, reporter)?;
             let reminder = reminders.observe_tool_batch(&tool_calls, &results);
             for result in results {
                 reporter.on_tool_result(&result)?;
@@ -195,10 +203,10 @@ where
 
     #[cfg(test)]
     fn execute_tool_batch(&self, tool_calls: &[ToolCall]) -> Vec<ToolResult> {
-        self.execute_tool_batch_internal(tool_calls)
+        self.execute_action_batch_internal(tool_calls)
     }
 
-    fn execute_tool_batch_with_reporter(
+    fn execute_action_batch_with_reporter(
         &self,
         tool_calls: &[ToolCall],
         reporter: &mut dyn Reporter,
@@ -206,19 +214,19 @@ where
         if tool_calls.len() <= 1 || !self.can_execute_in_parallel(tool_calls) {
             return Ok(tool_calls
                 .iter()
-                .map(|tool_call| self.execute_one_tool(tool_call))
+                .map(|tool_call| self.execute_one_action(tool_call))
                 .collect());
         }
 
         reporter.on_parallel_tool_batch()?;
-        Ok(self.execute_tool_batch_internal(tool_calls))
+        Ok(self.execute_action_batch_internal(tool_calls))
     }
 
-    fn execute_tool_batch_internal(&self, tool_calls: &[ToolCall]) -> Vec<ToolResult> {
+    fn execute_action_batch_internal(&self, tool_calls: &[ToolCall]) -> Vec<ToolResult> {
         if tool_calls.len() <= 1 || !self.can_execute_in_parallel(tool_calls) {
             return tool_calls
                 .iter()
-                .map(|tool_call| self.execute_one_tool(tool_call))
+                .map(|tool_call| self.execute_one_action(tool_call))
                 .collect();
         }
 
@@ -251,16 +259,35 @@ where
         })
     }
 
-    fn execute_one_tool(&self, tool_call: &ToolCall) -> ToolResult {
+    fn execute_one_action(&self, tool_call: &ToolCall) -> ToolResult {
+        if AgentSupervisor::is_runtime_command(&tool_call.name) {
+            let Some(supervisor) = &self.supervisor else {
+                return ToolResult::error(
+                    tool_call.id.clone(),
+                    format!("runtime command '{}' is not available", tool_call.name),
+                );
+            };
+            return supervisor.execute_command(tool_call);
+        }
+
         execute_one_tool(&self.registry, tool_call)
     }
 
     fn can_execute_in_parallel(&self, tool_calls: &[ToolCall]) -> bool {
         // Keep lesson 8 concurrency focused on exploration: any mutating or
         // unknown tool keeps the whole batch sequential.
-        tool_calls
-            .iter()
-            .all(|tool_call| self.registry.is_read_only_call(tool_call))
+        tool_calls.iter().all(|tool_call| {
+            !AgentSupervisor::is_runtime_command(&tool_call.name)
+                && self.registry.is_read_only_call(tool_call)
+        })
+    }
+
+    fn action_definitions(&self) -> Vec<crate::schema::ToolDefinition> {
+        let mut definitions = self.registry.definitions();
+        if let Some(supervisor) = &self.supervisor {
+            definitions.extend(supervisor.runtime_definitions());
+        }
+        definitions
     }
 
     fn session_transcript(

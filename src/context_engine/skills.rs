@@ -89,17 +89,33 @@ fn read_skill_file(
 ) -> Result<(PathBuf, PathBuf, String), ContextError> {
     validate_skill_id(skill_id)?;
 
-    let source = PathBuf::from(".tiny-claw")
+    let built_in_source = PathBuf::from("resources")
         .join("skills")
         .join(skill_id)
         .join("SKILL.md");
-    let path = work_dir.join(&source);
+    let built_in_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(&built_in_source);
+    match fs::read_to_string(&built_in_path) {
+        Ok(content) => return Ok((built_in_source, built_in_path, content)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(ContextError::ReadFile {
+                path: built_in_path,
+                source: error,
+            });
+        }
+    }
+
+    let workspace_source = PathBuf::from(".tiny-claw")
+        .join("skills")
+        .join(skill_id)
+        .join("SKILL.md");
+    let path = work_dir.join(&workspace_source);
     let content = fs::read_to_string(&path).map_err(|source| ContextError::ReadFile {
         path: path.clone(),
         source,
     })?;
 
-    Ok((source, path, content))
+    Ok((workspace_source, path, content))
 }
 
 fn validate_skill_id(skill_id: &str) -> Result<(), ContextError> {
@@ -286,6 +302,31 @@ mod tests {
 
         assert!(error.to_string().contains(".tiny-claw"));
         assert!(error.to_string().contains("missing"));
+    }
+
+    #[test]
+    fn built_in_skill_loads_from_resources() {
+        let work_dir = tempdir().unwrap();
+
+        let skills = load_active_skills(work_dir.path(), &["subagents".to_string()]).unwrap();
+
+        assert_eq!(skills[0].id, "subagents");
+        assert_eq!(
+            skills[0].source,
+            PathBuf::from("resources/skills/subagents/SKILL.md")
+        );
+        assert!(skills[0].body.contains("# Subagents"));
+    }
+
+    #[test]
+    fn built_in_skill_takes_precedence_over_workspace_skill() {
+        let work_dir = tempdir().unwrap();
+        write_skill(work_dir.path(), "subagents", "# Workspace Subagents\n");
+
+        let skills = load_active_skills(work_dir.path(), &["subagents".to_string()]).unwrap();
+
+        assert!(skills[0].body.contains("# Subagents"));
+        assert!(!skills[0].body.contains("# Workspace Subagents"));
     }
 
     #[test]

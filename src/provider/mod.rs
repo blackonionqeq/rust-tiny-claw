@@ -35,6 +35,10 @@ pub trait Provider {
     }
 }
 
+pub trait ProviderFactory: Send + Sync {
+    fn create(&self) -> Result<Box<dyn Provider + Send>, ProviderError>;
+}
+
 impl<T> Provider for Box<T>
 where
     T: Provider + ?Sized,
