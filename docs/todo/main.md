@@ -24,6 +24,8 @@
 ## Runtime
 
 - Add a minimal integration smoke test gated by a real API key.
+- Track integration test and real-provider coverage gaps in
+  `docs/todo/integration-tests.md`.
 - Add provider/runtime CLI flags when environment-only configuration becomes
   limiting. Prompt input and workspace override are already available through
   positional CLI text, stdin, `--workspace`, and `-C`.
