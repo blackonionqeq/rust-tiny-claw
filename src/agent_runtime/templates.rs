@@ -96,6 +96,9 @@ impl SubagentTemplateRegistry {
                     id: template_id.to_string(),
                 })?;
 
+        // Model-provided overrides may narrow behavior, but the template owns
+        // capabilities. Do not let a delegate call grant itself tools, skills,
+        // output modes, or a larger context budget.
         if !overrides.extra_skills.is_empty()
             || overrides.tool_profile.is_some()
             || overrides.output_contract.is_some()

@@ -71,6 +71,8 @@ struct SupervisorInner {
 struct AgentRecord {
     status: Arc<Mutex<AgentRunStatus>>,
     cancel_requested: Arc<AtomicBool>,
+    // JoinHandle can be consumed only once. Keep it separate from status so
+    // later join/status calls can still inspect the recorded terminal state.
     join: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -250,6 +252,8 @@ impl AgentSupervisor {
     }
 
     fn spawn(&self, spec: AgentSpec) -> Result<AgentHandle, RuntimeCommandError> {
+        // Resolve the delegated capability boundary before creating a record;
+        // bad templates must not leave ghost agents under .tiny-claw/agents.
         let tool_names = self.inner.tool_profiles.tools_for(&spec.tool_profile)?;
         let registry = self
             .inner
@@ -370,6 +374,8 @@ fn run_agent_thread(
         "{}\n\n# Task\n\n{}\n\n# Output Contract\n\nReturn Markdown with these sections:\n\n## Summary\n\n## Evidence\n\n## Uncertainty",
         spec.system_prompt, spec.task
     );
+    // Subagents share the same workspace but keep an independent session id, so
+    // their transcript can be persisted without polluting the parent history.
     let session = Session::new(agent_id.clone(), inner.work_dir.clone());
     let mut engine = AgentEngine::new(
         provider,
@@ -394,6 +400,8 @@ fn run_agent_thread(
 
     match result {
         Ok(transcript) => {
+            // The final report is the last assistant message, excluding tool
+            // requests and tool observations from the subagent's ReAct loop.
             let report = transcript
                 .iter()
                 .rev()
