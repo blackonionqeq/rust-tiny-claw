@@ -141,6 +141,8 @@ Registered workspace tools:
   optional path narrowing, case sensitivity, context lines, and bounded output.
 - `load_skill`: loads the full body for an enabled model-invokable skill from
   built-in resources or `.tiny-claw/skills/<skill-id>/SKILL.md`.
+- `request_user_help`: asks the user a concrete blocking question when the
+  current prompt, context, and available tools are insufficient to continue.
 
 `read_file`, `write_file`, `edit_file`, `grep`, and `load_skill` reject absolute
 paths or ids that escape the workspace. `grep` prefers `rg` in `PATH`, falls

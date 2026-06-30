@@ -41,6 +41,7 @@ graph TB
         WRITE["write_file.rs"]
         GREP["grep.rs"]
         LOAD_SKILL["load_skill.rs"]
+        REQUEST_HELP["request_user_help.rs"]
         PERM["permission.rs\nDangerous-command middleware"]
     end
 
@@ -76,7 +77,7 @@ graph TB
     REACT --> Memory
     REACT --> TELEM
 
-    REGISTRY --> BASH & EDIT & READ & WRITE & GREP & LOAD_SKILL
+    REGISTRY --> BASH & EDIT & READ & WRITE & GREP & LOAD_SKILL & REQUEST_HELP
     REGISTRY --> PERM
     REGISTRY --> TELEMETRY_TOOLS
     TELEMETRY_PROVIDER --> TELEM

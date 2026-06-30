@@ -38,6 +38,10 @@ fn cli_mock_smoke_uses_real_startup_path_and_fallback_prompt()
         stdout.contains("starting two-stage ReAct loop"),
         "expected ReAct loop output, got:\n{stdout}"
     );
+    assert!(
+        stdout.contains("tools registered: 7"),
+        "expected default registry to expose seven tools, got:\n{stdout}"
+    );
 
     let memory_root = work_dir.path().join(".tiny-claw");
     assert!(

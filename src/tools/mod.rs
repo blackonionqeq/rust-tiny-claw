@@ -5,6 +5,7 @@ mod load_skill;
 mod permission;
 mod read_file;
 mod registry;
+mod request_user_help;
 mod write_file;
 
 pub use bash::BashTool;
@@ -18,4 +19,5 @@ pub use read_file::ReadFileTool;
 pub use registry::{
     Tool, ToolAccessMode, ToolExecutionContext, ToolMiddleware, ToolRegistry, ToolRegistryError,
 };
+pub use request_user_help::RequestUserHelpTool;
 pub use write_file::WriteFileTool;

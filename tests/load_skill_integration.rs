@@ -4,7 +4,7 @@ use rust_tiny_claw::memory::FileMemory;
 use rust_tiny_claw::provider::{Provider, ProviderError};
 use rust_tiny_claw::schema::{Message, ToolCall, ToolDefinition};
 use rust_tiny_claw::telemetry::Telemetry;
-use rust_tiny_claw::tools::{LoadSkillTool, ToolRegistry, WriteFileTool};
+use rust_tiny_claw::tools::{LoadSkillTool, RequestUserHelpTool, ToolRegistry, WriteFileTool};
 use serde_json::json;
 use std::fs;
 use tempfile::tempdir;
@@ -58,6 +58,51 @@ fn mock_load_skill_keeps_body_out_of_initial_prompt_then_loads_on_demand()
     assert_eq!(
         fs::read_to_string(work_dir.path().join("skill-proof.txt"))?,
         "AUDIT_SENTINEL\n"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn mock_engine_executes_request_user_help_tool() -> Result<(), Box<dyn std::error::Error>> {
+    let work_dir = tempdir()?;
+    let mut registry = ToolRegistry::new();
+    registry.register(RequestUserHelpTool::new())?;
+
+    let mut engine = AgentEngine::new(
+        RequestUserHelpProvider { calls: 0 },
+        registry,
+        ContextManager::new(work_dir.path(), Vec::new()),
+        FileMemory::new(work_dir.path().join(".tiny-claw")),
+        Telemetry::default(),
+    );
+
+    let transcript = engine.run_with_options(
+        "Ask for help if blocked.",
+        RunOptions {
+            max_turns: 3,
+            enable_thinking: false,
+            plan_mode: false,
+            stream: false,
+            context_budget: ContextBudget::default(),
+        },
+    )?;
+
+    assert!(
+        transcript_has_tool_call(&transcript, "request_user_help"),
+        "expected transcript to call request_user_help:\n{}",
+        render_transcript(&transcript)
+    );
+    assert!(
+        transcript.iter().any(|message| {
+            message.tool_call_id.as_deref() == Some("call_request_help")
+                && message.content.contains("USER_HELP_REQUESTED")
+                && message
+                    .content
+                    .contains("question: Which target file should I edit?")
+        }),
+        "expected structured help request observation:\n{}",
+        render_transcript(&transcript)
     );
 
     Ok(())
@@ -127,6 +172,50 @@ impl Provider for LoadSkillProvider {
         }
 
         Ok(Message::assistant("skill proof complete"))
+    }
+}
+
+struct RequestUserHelpProvider {
+    calls: usize,
+}
+
+impl Provider for RequestUserHelpProvider {
+    fn name(&self) -> &'static str {
+        "request-user-help-provider"
+    }
+
+    fn generate(
+        &mut self,
+        messages: &[Message],
+        available_tools: Option<&[ToolDefinition]>,
+    ) -> Result<Message, ProviderError> {
+        self.calls += 1;
+        if self.calls == 1 {
+            assert_tool_available(available_tools, "request_user_help");
+            return Ok(Message::assistant_with_tools(
+                "need user help",
+                vec![ToolCall::new(
+                    "call_request_help",
+                    "request_user_help",
+                    json!({
+                        "reason": "The requested edit target is ambiguous.",
+                        "tried": "Checked the prompt and available workspace context.",
+                        "needed": "The user must identify the target file.",
+                        "question": "Which target file should I edit?"
+                    }),
+                )],
+            ));
+        }
+
+        assert!(
+            messages.iter().any(|message| {
+                message.tool_call_id.as_deref() == Some("call_request_help")
+                    && message.content.contains("USER_HELP_REQUESTED")
+            }),
+            "second provider call should include request_user_help observation:\n{}",
+            render_transcript(messages)
+        );
+        Ok(Message::assistant("waiting for user clarification"))
     }
 }
 

@@ -12,7 +12,8 @@ use crate::provider::{
 };
 use crate::telemetry::{Telemetry, TelemetryProvider, TelemetryToolMiddleware};
 use crate::tools::{
-    BashTool, EditFileTool, GrepTool, LoadSkillTool, ReadFileTool, ToolRegistry, WriteFileTool,
+    BashTool, EditFileTool, GrepTool, LoadSkillTool, ReadFileTool, RequestUserHelpTool,
+    ToolRegistry, WriteFileTool,
 };
 #[cfg(feature = "feishu")]
 use crate::tools::{PermissionDecision, RuleBasedToolPolicy, ToolPolicy};
@@ -104,6 +105,7 @@ fn build_registry(
     registry.register(BashTool::new(work_dir)?)?;
     registry.register(EditFileTool::new(work_dir)?)?;
     registry.register(GrepTool::new(work_dir)?)?;
+    registry.register(RequestUserHelpTool::new())?;
     registry.use_middleware(TelemetryToolMiddleware::new(telemetry));
     Ok(registry)
 }
