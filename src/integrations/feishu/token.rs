@@ -32,11 +32,11 @@ impl TenantTokenCache {
                 .cached
                 .lock()
                 .map_err(|_| TokenError::new("token cache poisoned"))?;
-            if let Some(cached) = cached.as_ref() {
-                if cached.expires_at > Instant::now() {
-                    debug!("Feishu tenant access token cache hit");
-                    return Ok(cached.token.clone());
-                }
+            if let Some(cached) = cached.as_ref()
+                && cached.expires_at > Instant::now()
+            {
+                debug!("Feishu tenant access token cache hit");
+                return Ok(cached.token.clone());
             }
         }
 

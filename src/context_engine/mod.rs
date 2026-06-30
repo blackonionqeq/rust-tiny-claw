@@ -92,10 +92,10 @@ impl ContextManager {
                     skill.name,
                     skill.source.display()
                 ));
-                if let Some(description) = skill.description {
-                    if !description.is_empty() {
-                        rendered.push_str(&format!("\n  description: {description}"));
-                    }
+                if let Some(description) = skill.description
+                    && !description.is_empty()
+                {
+                    rendered.push_str(&format!("\n  description: {description}"));
                 }
             }
             sections.push(rendered);

@@ -64,8 +64,7 @@ fn cli_mock_smoke_uses_real_startup_path_and_fallback_prompt()
 }
 
 fn tiny_claw_bin() -> &'static str {
-    option_env!("CARGO_BIN_EXE_tiny-claw")
-        .expect("Cargo should provide CARGO_BIN_EXE_tiny-claw for integration tests")
+    env!("CARGO_BIN_EXE_tiny-claw")
 }
 
 fn seed_workspace(work_dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {

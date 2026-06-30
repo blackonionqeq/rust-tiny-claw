@@ -222,7 +222,7 @@ where
 
             if tool_calls.is_empty() {
                 reporter.on_complete()?;
-                return Ok(self.session_transcript(session, options.plan_mode)?);
+                return self.session_transcript(session, options.plan_mode);
             }
 
             reporter.on_tool_calls(&tool_calls)?;

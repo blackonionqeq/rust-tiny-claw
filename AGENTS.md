@@ -59,6 +59,7 @@ From PowerShell, run:
 ```powershell
 wsl -d Ubuntu -- bash -lc "cd <repo-wsl-path> && cargo fmt && cargo fmt --check"
 wsl -d Ubuntu -- bash -lc "cd <repo-wsl-path> && cargo check"
+wsl -d Ubuntu -- bash -lc "cd <repo-wsl-path> && cargo clippy --all-targets --all-features"
 wsl -d Ubuntu -- bash -lc "cd <repo-wsl-path> && cargo run"
 ```
 
@@ -71,7 +72,7 @@ cargo check
 Before finishing code changes, run at least:
 
 ```powershell
-wsl -d Ubuntu -- bash -lc "cd <repo-wsl-path> && cargo fmt && cargo fmt --check && cargo check"
+wsl -d Ubuntu -- bash -lc "cd <repo-wsl-path> && cargo fmt && cargo fmt --check && cargo check && cargo clippy --all-targets --all-features"
 ```
 
 For behavior changes to the startup path, also run:

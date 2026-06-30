@@ -288,47 +288,37 @@ impl Tool for GrepTool {
             .rg_command(query, path, context_lines, max_matches, case_sensitive)
             .output()
         {
-            Ok(output) => {
-                return ToolResult::ok(
-                    call.id.clone(),
-                    self.format_command_output(output, "ripgrep", None),
-                );
-            }
+            Ok(output) => ToolResult::ok(
+                call.id.clone(),
+                self.format_command_output(output, "ripgrep", None),
+            ),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => match self
                 .grep_command(query, path, context_lines, max_matches, case_sensitive)
                 .output()
             {
-                Ok(output) => {
-                    return ToolResult::ok(
-                        call.id.clone(),
-                        self.format_command_output(
-                            output,
-                            "grep",
-                            Some(
-                                "ripgrep (rg) was not found in PATH; used grep fallback. Fallback results may not follow ripgrep ignore rules.",
-                            ),
-                        ),
-                    );
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    return ToolResult::ok(
-                        call.id.clone(),
-                        "neither ripgrep (rg) nor grep was found in PATH",
-                    );
-                }
-                Err(error) => {
-                    return ToolResult::error(
-                        call.id.clone(),
-                        format!("failed to start grep fallback: {error}"),
-                    );
-                }
-            },
-            Err(error) => {
-                return ToolResult::error(
+                Ok(output) => ToolResult::ok(
                     call.id.clone(),
-                    format!("failed to start ripgrep (rg): {error}"),
-                );
-            }
+                    self.format_command_output(
+                        output,
+                        "grep",
+                        Some(
+                            "ripgrep (rg) was not found in PATH; used grep fallback. Fallback results may not follow ripgrep ignore rules.",
+                        ),
+                    ),
+                ),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => ToolResult::ok(
+                    call.id.clone(),
+                    "neither ripgrep (rg) nor grep was found in PATH",
+                ),
+                Err(error) => ToolResult::error(
+                    call.id.clone(),
+                    format!("failed to start grep fallback: {error}"),
+                ),
+            },
+            Err(error) => ToolResult::error(
+                call.id.clone(),
+                format!("failed to start ripgrep (rg): {error}"),
+            ),
         }
     }
 }

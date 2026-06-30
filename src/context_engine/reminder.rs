@@ -230,11 +230,7 @@ fn is_path_key(key: &str) -> bool {
 }
 
 fn normalize_string(value: &str) -> String {
-    value
-        .trim()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn normalize_path_string(value: &str) -> String {

@@ -17,7 +17,7 @@ module map and architecture diagram.
 Use WSL Ubuntu from the repository root for the full build/check path:
 
 ```powershell
-wsl -d Ubuntu -- bash -lc "cargo fmt && cargo fmt --check && cargo check"
+wsl -d Ubuntu -- bash -lc "cargo fmt && cargo fmt --check && cargo check && cargo clippy --all-targets --all-features"
 ```
 
 For a quick type check from Windows PowerShell, `cargo check` is usually enough.
