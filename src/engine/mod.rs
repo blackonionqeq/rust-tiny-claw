@@ -426,7 +426,7 @@ where
     }
 
     fn can_execute_in_parallel(&self, tool_calls: &[ToolCall]) -> bool {
-        // Keep lesson 8 concurrency focused on exploration: any mutating or
+        // Keep read-only concurrency focused on exploration: any mutating or
         // unknown tool keeps the whole batch sequential.
         tool_calls.iter().all(|tool_call| {
             !AgentSupervisor::is_runtime_command(&tool_call.name)

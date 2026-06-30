@@ -2,7 +2,7 @@
 
 ## Context
 
-The lesson 6 `bash` tool is intentionally small: it runs one command in the
+The current `bash` tool is intentionally small: it runs one command in the
 workspace, waits for completion, returns stdout/stderr, enforces a timeout, and
 lets the model self-correct from command output.
 
@@ -111,17 +111,17 @@ The first version should stay local and minimal:
 
 Persisting task metadata across engine restarts is useful later, but live child
 process handles cannot be restored from disk directly. Recovery should be a
-separate design if the course reaches that point.
+separate design when that becomes necessary.
 
 ## Why Not Implement Now
 
-Background task management crosses a different boundary than lesson 6:
+Background task management crosses a different boundary than the foreground
+`bash` tool:
 
 - It introduces runtime-owned process lifecycle state.
 - It needs log storage and status inspection.
 - It may need cleanup on engine shutdown.
-- It starts to overlap with future memory, middleware, and approval lessons.
+- It starts to overlap with memory, middleware, and approval policy.
 
 For now, keep `bash` focused on bounded foreground execution. Add background
-task tools later when the project reaches a chapter that needs long-running
-local services.
+task tools later when the project needs long-running local services.

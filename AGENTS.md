@@ -2,9 +2,9 @@
 
 ## Project Goal
 
-This repository is a Rust rewrite of the `go-tiny-claw` Agent Harness course
-project. Build it lesson by lesson. Keep each change aligned with the current
-course chapter instead of implementing later features early.
+This repository is a Rust implementation of a small Agent Harness runtime.
+Build it incrementally. Keep each change aligned with the current design scope
+instead of implementing broad future features early.
 
 The desired architecture is a small, explicit Harness runtime:
 
@@ -21,20 +21,20 @@ The desired architecture is a small, explicit Harness runtime:
 - Prefer Rust/Cargo conventions over copying the Go layout literally.
 - Keep the framework minimal. Do not add a heavy agent framework dependency.
 - Use clear traits at module boundaries, especially for providers and tools.
-- Add real behavior incrementally as the course reaches that topic.
+- Add real behavior incrementally as the project design needs it.
 - Keep placeholders small and compileable.
 - Avoid extending Feishu, compaction, subagents, tracing, or benchmarks beyond
-  the documented course/design scope unless explicitly requested.
+  the documented design scope unless explicitly requested.
 - Keep gateway-specific usage docs under `docs/usage/`, such as
   `docs/usage/feishu.md`, and link them from `README.md` instead of expanding
   the README with deployment details.
 - Keep skill behavior documented in README for users and under `docs/design/`
   for design details. Do not inject full skill bodies into the initial prompt;
-  use the model-visible catalog plus `load_skill` flow unless a later lesson
+  use the model-visible catalog plus `load_skill` flow unless a later design
   explicitly changes that architecture.
 - When searching for a document explicitly named or pointed to by the user, use
-  `rg -u` so ignored local course/material directories such as `1274/` are not
-  skipped.
+  `rg -u` so ignored local reference/material directories such as `1274/` are
+  not skipped.
 
 ## Git And Commit Style
 

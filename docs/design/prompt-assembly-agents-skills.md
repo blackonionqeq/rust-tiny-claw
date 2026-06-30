@@ -6,7 +6,7 @@ Move prompt construction out of the ReAct loop and into `context_engine` so the
 engine no longer grows hard-coded prompt strings. The first implementation
 should support workspace instructions from `AGENTS.md` and explicitly enabled
 Codex-style skills, while keeping the behavior small enough for the current
-course chapter.
+project scope.
 
 ## Non-Goals
 

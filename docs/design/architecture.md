@@ -56,9 +56,14 @@ graph TB
     end
 
     subgraph Telemetry["telemetry · Observability"]
-        TELEM["Telemetry\nIn-memory totals"]
+        METRICS["metrics.rs\nIn-memory totals"]
         TELEMETRY_PROVIDER["TelemetryProvider\nLLM call timing & usage"]
         TELEMETRY_TOOLS["TelemetryToolMiddleware\nTool call timing"]
+        TRACE_RECORDER["trace.rs\nTraceRecorder & spans"]
+        TRACE_CONFIG["exporter.rs\nTrace mode config"]
+        JSON_EXPORTER["json_exporter.rs\nLocal trace trees"]
+        OTLP_EXPORTER["otlp_exporter.rs\nOTLP trace sink"]
+        FANOUT_EXPORTER["FanOutTraceExporter\njson + otlp"]
     end
 
     CLI --> REACT
@@ -75,13 +80,21 @@ graph TB
     REACT --> ContextEngine
     REACT --> AgentRuntime
     REACT --> Memory
-    REACT --> TELEM
+    REACT --> TRACE_CONFIG
+    REACT --> TRACE_RECORDER
 
     REGISTRY --> BASH & EDIT & READ & WRITE & GREP & LOAD_SKILL & REQUEST_HELP
     REGISTRY --> PERM
     REGISTRY --> TELEMETRY_TOOLS
-    TELEMETRY_PROVIDER --> TELEM
-    TELEMETRY_TOOLS --> TELEM
+    REGISTRY --> TRACE_RECORDER
+    TELEMETRY_PROVIDER --> METRICS
+    TELEMETRY_TOOLS --> METRICS
+    TRACE_CONFIG --> JSON_EXPORTER
+    TRACE_CONFIG --> OTLP_EXPORTER
+    TRACE_CONFIG --> FANOUT_EXPORTER
+    TRACE_RECORDER --> JSON_EXPORTER
+    TRACE_RECORDER --> OTLP_EXPORTER
+    TRACE_RECORDER --> FANOUT_EXPORTER
 
     PLAN --> REACT
     SUPERVISOR --> REACT
@@ -100,4 +113,4 @@ graph TB
 | Tools | `tools/` | Tool trait, registry, dispatch; permission and telemetry middleware |
 | Memory | `memory/` | File-backed session state, working memory, todo management |
 | Integration | `integrations/feishu/` | Feishu event stream; human-approval webhook |
-| Telemetry | `telemetry/` | LLM token usage aggregation; LLM and tool elapsed-time totals |
+| Telemetry | `telemetry/` | LLM token usage aggregation; LLM and tool elapsed-time totals; trace span recording and JSON/OTLP export |

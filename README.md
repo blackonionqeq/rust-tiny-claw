@@ -1,13 +1,13 @@
 # rust-tiny-claw
 
-Rust learning project for building an Agent Harness lesson by lesson.
+Rust learning project for building a small Agent Harness runtime.
 
-Current chapter state: the harness can run a two-stage ReAct loop, call local
+Current runtime state: the harness can run a two-stage ReAct loop, call local
 workspace tools, execute same-turn read-only tool batches in parallel, keep
 bounded provider request contexts over full per-session history, delegate
-read-only exploration to subagents, and use Plan Mode for long-running tasks. It
-supports the built-in mock provider plus OpenAI/Claude-compatible HTTP
-providers.
+read-only exploration to subagents, ask the user for help when blocked, and use
+Plan Mode for long-running tasks. It supports the built-in mock provider plus
+OpenAI/Claude-compatible HTTP providers.
 
 See [docs/design/architecture.md](docs/design/architecture.md) for the full
 module map and architecture diagram.
@@ -90,17 +90,17 @@ model-visible catalog.
 
 ## Tool Dispatch
 
-The harness supports lesson 8 parallel tool calling for read-only batches. When
+The harness supports parallel tool calling for read-only batches. When
 a provider returns multiple read-only tool calls in the same assistant message,
 the engine forks those calls onto scoped Rust threads, waits for all of them to
 finish, then appends the observations in the original tool-call order. If any
 call in the batch may mutate the workspace, the engine keeps the batch
 sequential.
 
-This implementation intentionally follows the course scope: it trusts the
+This implementation intentionally follows the current design scope: it trusts the
 model's same-turn independence assumption for read-only exploration and does
 not yet add path-based file locks, async file APIs, or a global concurrency
-limit. Those are production hardening topics for later lessons.
+limit. Those are production hardening topics for later work.
 
 ## Subagent Delegation
 
@@ -148,7 +148,7 @@ Registered workspace tools:
 paths or ids that escape the workspace. `grep` prefers `rg` in `PATH`, falls
 back to system `grep` when `rg` is missing, and reports a clear observation if
 neither command is available. The fallback may not follow ripgrep's ignore
-rules. `bash` follows the course's local YOLO execution model, but still binds
+rules. `bash` follows a local YOLO execution model, but still binds
 execution to the workspace and enforces resource limits.
 
 ## Feishu Integration

@@ -2,7 +2,7 @@
 
 ## Context
 
-`rust-tiny-claw` currently uses a fixed `RunOptions.enable_thinking` boolean. That is useful for lessons and smoke tests, but it is not the shape most production agent systems eventually want. Reasoning has real latency and token cost, while many tool calls and retrieval-style tasks do not benefit from an extra thinking phase.
+`rust-tiny-claw` currently uses a fixed `RunOptions.enable_thinking` boolean. That is useful for smoke tests, but it is not the shape most production agent systems eventually want. Reasoning has real latency and token cost, while many tool calls and retrieval-style tasks do not benefit from an extra thinking phase.
 
 The next step should be a policy-driven mode:
 

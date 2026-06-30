@@ -22,8 +22,8 @@ impl OtlpTraceExporter {
 
 impl TraceExporter for OtlpTraceExporter {
     fn export(&self, _batch: &[TraceSpanRecord]) -> Result<(), TraceExportError> {
-        // The internal trace model is now isolated behind TraceExporter. A later
-        // lesson can map TraceSpanRecord into OTLP protobuf/HTTP here without
+        // The internal trace model is now isolated behind TraceExporter. Later
+        // work can map TraceSpanRecord into OTLP protobuf/HTTP here without
         // touching engine instrumentation.
         Ok(())
     }

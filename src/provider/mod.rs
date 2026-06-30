@@ -9,7 +9,7 @@ pub use claude_compatible::ClaudeCompatibleProvider;
 pub use openai_compatible::OpenAiCompatibleProvider;
 
 // Provider is the narrow boundary between the harness and an LLM backend.
-// This lesson keeps it synchronous; real network adapters can come later.
+// The trait stays synchronous while concrete adapters own their network details.
 pub trait Provider {
     fn name(&self) -> &'static str;
 
