@@ -3,11 +3,10 @@
 Rust learning project for building an Agent Harness lesson by lesson.
 
 Current chapter state: the harness can run a two-stage ReAct loop, call local
-workspace tools, execute same-turn tool batches in parallel, keep bounded
-provider request contexts over full per-session history, and delegate isolated
-read-only exploration to subagents. For long-running tasks, Plan Mode can prompt
-the model to externalize task state into workspace `PLAN.md` and `TODO.md`
-files. It supports the built-in mock provider plus OpenAI/Claude-compatible HTTP
+workspace tools, execute same-turn read-only tool batches in parallel, keep
+bounded provider request contexts over full per-session history, delegate
+read-only exploration to subagents, and use Plan Mode for long-running tasks. It
+supports the built-in mock provider plus OpenAI/Claude-compatible HTTP
 providers.
 
 ## Run
@@ -80,10 +79,11 @@ To test explicitly enabled skills, create Codex-style skill files such as
 wsl -d Ubuntu -- bash -lc "TINY_CLAW_SKILLS=rust cargo run --bin tiny-claw -- -C /mnt/d/codes/other-project 'Use the active skill and inspect this repository.'"
 ```
 
-Enabled skills are advertised to the model as compact metadata first. The model
-can call `load_skill` to load the full `SKILL.md` body when relevant. Add
+The built-in `subagents` skill is enabled automatically. Other enabled skills
+are advertised to the model as compact metadata first. The model can call
+`load_skill` to load the full `SKILL.md` body when relevant. Add
 `disable-model-invocation: true` to a skill's frontmatter to keep it out of the
-model-visible catalog and prevent model-initiated loading.
+model-visible catalog.
 
 ## Tool Dispatch
 
@@ -137,7 +137,7 @@ Registered workspace tools:
 - `grep`: searches workspace files with ripgrep-compatible regular expressions,
   optional path narrowing, case sensitivity, context lines, and bounded output.
 - `load_skill`: loads the full body for an enabled model-invokable skill from
-  `.tiny-claw/skills/<skill-id>/SKILL.md`.
+  built-in resources or `.tiny-claw/skills/<skill-id>/SKILL.md`.
 
 `read_file`, `write_file`, `edit_file`, `grep`, and `load_skill` reject absolute
 paths or ids that escape the workspace. `grep` prefers `rg` in `PATH`, falls
@@ -164,12 +164,12 @@ and different chat sessions separate from the files each agent run can read and
 edit.
 
 The first callback endpoint is `POST /feishu/events`. It supports Feishu URL
-verification, text message receive events, tenant access token caching, and
-plain text replies to the originating chat. It also applies in-process message
-deduplication, keeps in-process per-chat sessions, and replies with an
-unsupported-message notice for non-text messages. Encrypted callbacks, cards,
-approvals, persistent deduplication, persistent sessions, and task scheduling
-are still later integration work.
+verification, text message receive events, tenant access token caching, plain
+text replies, in-process message deduplication, in-process per-chat sessions,
+unsupported-message replies, and interactive approval cards for Feishu tool
+calls that match the default `ask` policy. Encrypted callbacks, persistent
+deduplication, persistent sessions, and task scheduling are still later
+integration work.
 
 For Linux server deployment, nginx reverse proxy setup, and release binary
 usage, see `docs/usage/feishu.md`.

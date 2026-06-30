@@ -23,9 +23,8 @@ The desired architecture is a small, explicit Harness runtime:
 - Use clear traits at module boundaries, especially for providers and tools.
 - Add real behavior incrementally as the course reaches that topic.
 - Keep placeholders small and compileable.
-- Avoid extending Feishu beyond the documented gateway scope, or implementing
-  compaction, subagents, tracing, or benchmarks before their matching lessons
-  unless explicitly requested.
+- Avoid extending Feishu, compaction, subagents, tracing, or benchmarks beyond
+  the documented course/design scope unless explicitly requested.
 - Keep gateway-specific usage docs under `docs/usage/`, such as
   `docs/usage/feishu.md`, and link them from `README.md` instead of expanding
   the README with deployment details.
@@ -79,4 +78,10 @@ For behavior changes to the startup path, also run:
 
 ```powershell
 wsl -d Ubuntu -- bash -lc "cd <repo-wsl-path> && cargo run"
+```
+
+For Feishu integration changes, also check the feature-gated binary:
+
+```powershell
+wsl -d Ubuntu -- bash -lc "cd <repo-wsl-path> && cargo check --features feishu --bin tiny-claw-feishu"
 ```
