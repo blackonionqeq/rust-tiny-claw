@@ -200,6 +200,12 @@ Common variables:
   after each provider call.
 - `TINY_CLAW_SKILLS`: optional comma-separated skill ids loaded from
   `.tiny-claw/skills/<skill-id>/SKILL.md`.
+- `TINY_CLAW_TRACE`: optional tracing mode. Supported values are `off`, `json`,
+  `debug`, `otlp`, and `both`. `json` and `debug` write trace files under
+  `.tiny-claw/traces/`.
+- `TINY_CLAW_OTLP_ENDPOINT`: OpenTelemetry Collector base URL for `otlp` or
+  `both` tracing modes, for example `http://localhost:4318`. The runtime sends
+  traces to `/v1/traces`.
 
 Claude-compatible providers also use:
 

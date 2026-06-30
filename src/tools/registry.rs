@@ -1,4 +1,7 @@
 use crate::schema::{ToolCall, ToolDefinition, ToolResult};
+use crate::telemetry::trace::{
+    TraceAttribute, TraceContext, TraceStatus, json_preview, text_preview,
+};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
@@ -91,8 +94,34 @@ impl ToolRegistry {
     }
 
     pub fn execute(&self, call: &ToolCall) -> ToolResult {
+        self.execute_with_trace(call, None)
+    }
+
+    pub fn execute_with_trace(
+        &self,
+        call: &ToolCall,
+        trace_context: Option<&TraceContext>,
+    ) -> ToolResult {
+        let mut trace_span = trace_context.map(|context| {
+            context.start_child(
+                "Tool.Execute",
+                vec![
+                    TraceAttribute::new("tool.name", call.name.clone()),
+                    TraceAttribute::new("tool.call_id", call.id.clone()),
+                    TraceAttribute::new("tool.arguments.preview", json_preview(&call.arguments)),
+                ],
+            )
+        });
+
         // Unknown tools are reported as observations instead of panicking the loop.
         let Some(tool) = self.tools.get(call.name.as_str()) else {
+            if let Some(span) = &trace_span {
+                span.add_attribute(TraceAttribute::new("tool.success", false));
+                span.add_attribute(TraceAttribute::new("tool.unknown", true));
+            }
+            if let Some(span) = trace_span.take() {
+                span.end_error(format!("tool '{}' is not registered", call.name));
+            }
             return ToolResult::error(
                 call.id.clone(),
                 format!("tool '{}' is not registered", call.name),
@@ -101,6 +130,16 @@ impl ToolRegistry {
 
         for middleware in &self.middlewares {
             if let Some(result) = middleware.before_execute(call) {
+                if let Some(span) = &trace_span {
+                    span.add_attributes([
+                        TraceAttribute::new("tool.success", false),
+                        TraceAttribute::new("tool.blocked", true),
+                        TraceAttribute::new("tool.output.preview", text_preview(&result.output)),
+                    ]);
+                }
+                if let Some(span) = trace_span.take() {
+                    span.end_error("tool blocked by middleware");
+                }
                 // Policy rejections are not executed tool work, so they do not
                 // receive timing context or after_execute callbacks.
                 return result;
@@ -108,6 +147,12 @@ impl ToolRegistry {
         }
 
         let access_mode = tool.access_mode(call);
+        if let Some(span) = &trace_span {
+            span.add_attribute(TraceAttribute::new(
+                "tool.access_mode",
+                format!("{access_mode:?}"),
+            ));
+        }
         let start = Instant::now();
         let result = tool.execute(call);
         let context = ToolExecutionContext {
@@ -117,6 +162,23 @@ impl ToolRegistry {
 
         for middleware in &self.middlewares {
             middleware.after_execute(call, &result, &context);
+        }
+
+        if let Some(span) = &trace_span {
+            span.add_attributes([
+                TraceAttribute::new("tool.success", !result.is_error),
+                TraceAttribute::new("tool.elapsed_ms", context.elapsed.as_millis() as u64),
+                TraceAttribute::new("tool.output.preview", text_preview(&result.output)),
+            ]);
+        }
+        if let Some(mut span) = trace_span {
+            if result.is_error {
+                span.end_with_status(TraceStatus::Error {
+                    message: text_preview(&result.output),
+                });
+            } else {
+                span.end_with_status(TraceStatus::Ok);
+            }
         }
 
         result
