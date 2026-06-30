@@ -387,6 +387,11 @@ fn run_agent_thread(
     let result = engine.run_session(&session, task, options);
     persist_history(&agent_root, &session.history());
 
+    if cancel_requested.load(Ordering::SeqCst) {
+        mark_cancelled(&agent_root, &status);
+        return;
+    }
+
     match result {
         Ok(transcript) => {
             let report = transcript
@@ -513,95 +518,4 @@ impl From<ProviderError> for RuntimeCommandError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::provider::Provider;
-    use crate::schema::ToolDefinition;
-    use crate::tools::{GrepTool, LoadSkillTool, ReadFileTool};
-    use std::sync::Mutex;
-    use tempfile::tempdir;
-
-    struct StaticProviderFactory {
-        outputs: Arc<Mutex<Vec<String>>>,
-    }
-
-    impl ProviderFactory for StaticProviderFactory {
-        fn create(&self) -> Result<Box<dyn Provider + Send>, ProviderError> {
-            let output = self.outputs.lock().unwrap().remove(0);
-            Ok(Box::new(StaticProvider { output }))
-        }
-    }
-
-    struct StaticProvider {
-        output: String,
-    }
-
-    impl Provider for StaticProvider {
-        fn name(&self) -> &'static str {
-            "static"
-        }
-
-        fn generate(
-            &mut self,
-            _messages: &[Message],
-            _available_tools: Option<&[ToolDefinition]>,
-        ) -> Result<Message, ProviderError> {
-            Ok(Message::assistant(self.output.clone()))
-        }
-    }
-
-    #[test]
-    fn delegate_join_returns_final_report_and_persists_files() {
-        let work_dir = tempdir().unwrap();
-        let mut registry = ToolRegistry::new();
-        registry
-            .register(ReadFileTool::new(work_dir.path()).unwrap())
-            .unwrap();
-        registry
-            .register(GrepTool::new(work_dir.path()).unwrap())
-            .unwrap();
-        registry
-            .register(LoadSkillTool::new(work_dir.path(), vec!["subagents".to_string()]).unwrap())
-            .unwrap();
-        let skill_dir = work_dir.path().join(".tiny-claw/skills/subagents");
-        fs::create_dir_all(&skill_dir).unwrap();
-        fs::write(skill_dir.join("SKILL.md"), "# Subagents\n").unwrap();
-
-        let factory = Arc::new(StaticProviderFactory {
-            outputs: Arc::new(Mutex::new(vec![
-                "## Summary\n\nDone\n\n## Evidence\n\n- Cargo.toml\n\n## Uncertainty\n\nNone"
-                    .to_string(),
-            ])),
-        });
-        let supervisor = AgentSupervisor::new(
-            factory,
-            registry,
-            work_dir.path(),
-            work_dir.path().join(".tiny-claw"),
-        );
-
-        let handle = supervisor
-            .delegate(DelegateAgentRequest {
-                template_id: "explorer".to_string(),
-                task: "inspect".to_string(),
-                overrides: AgentOverrides::empty(),
-                parent_session_id: None,
-            })
-            .unwrap();
-        let report = supervisor.join(&handle.id).unwrap();
-
-        assert!(report.contains("## Summary"));
-        assert_eq!(
-            supervisor.status(&handle.id).unwrap(),
-            AgentStatus::Completed
-        );
-        assert!(
-            work_dir
-                .path()
-                .join(".tiny-claw/agents")
-                .join(&handle.id)
-                .join("report.md")
-                .exists()
-        );
-    }
-}
+mod tests;
