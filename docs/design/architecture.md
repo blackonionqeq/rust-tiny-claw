@@ -27,6 +27,7 @@ graph TB
     end
 
     subgraph Provider["provider · Model Adapters"]
+        PROVIDER_TRAIT["Provider trait\nModel boundary"]
         CLAUDE["claude_compatible\nClaude / Anthropic"]
         OPENAI["openai_compatible\nOpenAI-compatible API"]
         SSE["sse.rs\nStreaming parser"]
@@ -54,25 +55,36 @@ graph TB
     end
 
     subgraph Telemetry["telemetry · Observability"]
-        TELEM["Token cost\nElapsed time\nTracing"]
+        TELEM["Telemetry\nIn-memory totals"]
+        TELEMETRY_PROVIDER["TelemetryProvider\nLLM call timing & usage"]
+        TELEMETRY_TOOLS["TelemetryToolMiddleware\nTool call timing"]
     end
 
     CLI --> REACT
     FEISHU_BIN --> FEISHU
     FEISHU --> REACT
 
-    REACT --> Provider
-    REACT --> Tools
+    REACT --> TELEMETRY_PROVIDER
+    TELEMETRY_PROVIDER --> PROVIDER_TRAIT
+    PROVIDER_TRAIT --> CLAUDE & OPENAI
+    CLAUDE --> SSE
+    OPENAI --> SSE
+
+    REACT --> REGISTRY
     REACT --> ContextEngine
     REACT --> AgentRuntime
     REACT --> Memory
-    REACT --> Telemetry
+    REACT --> TELEM
 
     REGISTRY --> BASH & EDIT & READ & WRITE & GREP & LOAD_SKILL
     REGISTRY --> PERM
+    REGISTRY --> TELEMETRY_TOOLS
+    TELEMETRY_PROVIDER --> TELEM
+    TELEMETRY_TOOLS --> TELEM
 
     PLAN --> REACT
     SUPERVISOR --> REACT
+    SUPERVISOR --> TELEMETRY_PROVIDER
 ```
 
 ## Layer Summary
@@ -84,7 +96,7 @@ graph TB
 | Subagents | `agent_runtime/` | Subagent lifecycle, supervisor, prompt templates |
 | Context | `context_engine/` | Skill loading, context compaction, error recovery, system reminders |
 | Provider | `provider/` | Model-agnostic trait; Claude and OpenAI-compatible adapters; SSE parsing |
-| Tools | `tools/` | Tool trait, registry, dispatch; dangerous-command middleware |
+| Tools | `tools/` | Tool trait, registry, dispatch; permission and telemetry middleware |
 | Memory | `memory/` | File-backed session state, working memory, todo management |
 | Integration | `integrations/feishu/` | Feishu event stream; human-approval webhook |
-| Telemetry | `telemetry/` | Token cost tracking, elapsed time, tracing |
+| Telemetry | `telemetry/` | LLM token usage aggregation; LLM and tool elapsed-time totals |
