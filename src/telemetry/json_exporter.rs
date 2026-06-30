@@ -48,9 +48,22 @@ pub struct TraceTreeNode {
 
 pub fn build_trace_tree(records: &[TraceSpanRecord]) -> Vec<TraceTreeNode> {
     let mut children_by_parent: HashMap<Option<SpanId>, Vec<TraceSpanRecord>> = HashMap::new();
+    let span_ids = records
+        .iter()
+        .map(|record| record.span_id)
+        .collect::<Vec<_>>();
     for record in records {
+        let parent = if record
+            .parent_span_id
+            .is_some_and(|parent| span_ids.contains(&parent))
+        {
+            record.parent_span_id
+        } else {
+            None
+        };
+
         children_by_parent
-            .entry(record.parent_span_id)
+            .entry(parent)
             .or_default()
             .push(record.clone());
     }
@@ -112,5 +125,17 @@ mod tests {
             events: Vec::new(),
             status: TraceStatus::Ok,
         }
+    }
+
+    #[test]
+    fn json_tree_keeps_orphaned_batch_spans_as_roots() {
+        let child = span("child", 2, Some(SpanId(1)), 11);
+
+        let tree = build_trace_tree(&[child]);
+
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].span.name, "child");
+        assert_eq!(tree[0].span.parent_span_id, Some(SpanId(1)));
+        assert!(tree[0].children.is_empty());
     }
 }
