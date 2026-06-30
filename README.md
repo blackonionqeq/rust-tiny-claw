@@ -9,6 +9,9 @@ read-only exploration to subagents, and use Plan Mode for long-running tasks. It
 supports the built-in mock provider plus OpenAI/Claude-compatible HTTP
 providers.
 
+See [docs/design/architecture.md](docs/design/architecture.md) for the full
+module map and architecture diagram.
+
 ## Run
 
 Use WSL Ubuntu from the repository root for the full build/check path:
