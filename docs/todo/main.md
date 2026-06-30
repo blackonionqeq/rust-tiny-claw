@@ -27,6 +27,7 @@
 - Add provider/runtime CLI flags when environment-only configuration becomes
   limiting. Prompt input and workspace override are already available through
   positional CLI text, stdin, `--workspace`, and `-C`.
+- Track subagent runtime follow-ups in `docs/todo/subagents.md`.
 
 ## Context And Memory
 
